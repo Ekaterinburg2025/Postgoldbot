@@ -734,18 +734,40 @@ def get_admin_statistics():
     for user_id, posts in user_posts.items():
         # Получаем количество публикаций за сегодня
         published_today = 0
+        links = []
+        details = {}
+
         for post in posts:
             if is_today(post["time"]):
                 published_today += 1
+                links.append(f"https://t.me/c/{str(post['chat_id'])[4:]}/{post['message_id']}")
 
-        # Получаем ссылки на публикации
-        links = [f"https://t.me/c/{str(post['chat_id'])[4:]}/{post['message_id']}" for post in posts]
+                # Детализация по сетям и городам
+                network = post["network"]
+                city = post["city"]
+                if network not in details:
+                    details[network] = {}
+                if city not in details[network]:
+                    details[network][city] = {"published": 0, "remaining": 3}
+                details[network][city]["published"] += 1
+
+        # Общий лимит для режима "Все сети"
+        if "Все сети" in details:
+            total_published = sum(
+                data["published"]
+                for network in details
+                for city in details[network]
+            )
+            remaining = max(0, 9 - total_published)
+        else:
+            remaining = max(0, 3 - published_today)
 
         # Добавляем данные в статистику
         statistics[user_id] = {
             "published": published_today,
-            "remaining": max(0, 3 - published_today),
-            "links": links
+            "remaining": remaining,
+            "links": links,
+            "details": details
         }
     return statistics
 
@@ -797,25 +819,32 @@ def select_user_for_duration_change(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("change_duration_"))
 def handle_duration_change(call):
     try:
+        # Разбираем данные из callback
         data = call.data.split("_")
         user_id = int(data[2])
         days = int(data[3])
 
+        # Проверяем, есть ли пользователь в списке оплативших
         if user_id not in paid_users:
             bot.answer_callback_query(call.id, " Пользователь не найден в списке оплативших.")
             return
 
+        # Обновляем срок оплаты для всех записей пользователя
         for entry in paid_users[user_id]:
-            expiry_date = entry["expiry_date"]
-            if isinstance(expiry_date, str):  # Если дата в формате строки
-                expiry_date = datetime.fromisoformat(expiry_date)
-            entry["expiry_date"] = expiry_date + timedelta(days=days)
+            end_date = entry["end_date"]
+            if isinstance(end_date, str):  # Если дата в формате строки
+                end_date = datetime.fromisoformat(end_date)
+            entry["end_date"] = end_date + timedelta(days=days)
 
+        # Сохраняем изменения
         save_data()
+
+        # Уведомляем администратора
         bot.answer_callback_query(call.id, f"✅ Срок изменён на {days} дней.")
         show_paid_users(call.message)
     except Exception as e:
         print(f"Ошибка в handle_duration_change: {e}")
+        bot.answer_callback_query(call.id, " Произошла ошибка при изменении срока.")
 
 # Основная логика публикации объявлений
 @bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
