@@ -121,9 +121,9 @@ def save_data():
         "paid_users": {
             user_id: [
                 {
-                    "end_date": entry["end_date"].isoformat() if isinstance(entry["end_date"], datetime) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
+                    "end_date": entry["end_date"],  # Убедитесь, что 'end_date' существует
+                    "network": entry["network"],    # Ключ 'network'
+                    "city": entry["city"]           # Ключ 'city'
                 }
                 for entry in entries
             ]
@@ -258,9 +258,9 @@ def save_data():
         "paid_users": {
             user_id: [
                 {
-                    "end_date": entry["end_date"].isoformat() if isinstance(entry["end_date"], datetime) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
+                    "end_date": entry["end_date"],  # Убедитесь, что 'end_date' существует
+                    "network": entry["network"],    # Ключ 'network'
+                    "city": entry["city"]           # Ключ 'city'
                 }
                 for entry in entries
             ]
@@ -549,6 +549,8 @@ def select_duration_for_payment(message, user_id, network, city):
             cities = list(chat_ids_parni.keys())
         elif network == "НС":
             cities = list(chat_ids_ns.keys())
+        markup.add(*cities)
+        markup.add("Назад")
         bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
         bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
         return
@@ -562,22 +564,22 @@ def select_duration_for_payment(message, user_id, network, city):
         days = 30
     else:
         bot.send_message(message.chat.id, " Ошибка! Выберите правильный срок.")
-        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
+        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))]
         return
 
     expiry_date = datetime.now() + timedelta(days=days)
 
     if user_id not in paid_users:
-        paid_users[user_id] = []
+        paid_users[user_id] = []  # Инициализируем список, если он отсутствует
 
+    # Добавляем данные с ключом 'end_date'
     paid_users[user_id].append({
-        "expiry_date": expiry_date.isoformat(),  # Сохраняем дату в формате строки
+        "end_date": expiry_date.isoformat(),  # Используем isoformat для сериализации
         "network": network,
         "city": city
     })
     save_data()  # Сохраняем данные
-    print(f"Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
-    bot.send_message(message.chat.id, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(message.chat.id, f" ✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
 
 # Функция для добавления администратора
 def add_admin_step(message):
