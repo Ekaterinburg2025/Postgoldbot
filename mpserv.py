@@ -22,6 +22,13 @@ bot = telebot.TeleBot(TOKEN)
 # Админ ID (ваш ID)
 ADMIN_CHAT_ID = 479938867  # Замените на ваш ID
 
+# Глобальные переменные
+paid_users = {}  # Инициализация глобальной переменной
+user_posts = {}
+user_daily_posts = {}
+user_statistics = {}
+admins = [ADMIN_CHAT_ID]
+
 # Списки chat_id для каждой сети и города
 chat_ids_mk = {
     "Екатеринбург": -1002210043742,
