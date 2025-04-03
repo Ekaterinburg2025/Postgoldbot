@@ -5,6 +5,14 @@ import pytz
 import telebot
 from telebot import types
 import sqlite3
+from flask import Flask
+
+# Создаём Flask-приложение
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
 
 # Токен бота
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
