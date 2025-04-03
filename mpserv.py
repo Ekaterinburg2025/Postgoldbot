@@ -101,9 +101,9 @@ user_daily_posts = {}
 
 # Статичные подписи для каждой сети
 network_signatures = {
-    "Мужской Клуб": "️ ️Реклама. Согласовано с администрация сети МК.️",
-    "ПАРНИ 18+": "️️",
-    "НС": "️️"
+    "Мужской Клуб": "️ 🕸️Реклама. Согласовано с администрация сети МК.🕸️",
+    "ПАРНИ 18+": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫",
+    "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
 
 # Словарь для хранения статистики публикаций
@@ -439,7 +439,7 @@ def update_daily_posts(user_id, network, city):
     if city not in user_daily_posts[user_id][network]:
         user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
 
-    # Добавляем временную метка публикации
+    # Добавляем временную метку публикации
     post_time = datetime.now()
     user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
     user_daily_posts[user_id][network][city]["last_post_time"] = post_time
@@ -969,38 +969,50 @@ def handle_delete_post(message):
         bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
 
+    # Проверяем, есть ли у пользователя опубликованные сообщения
+    if message.chat.id not in user_posts or not user_posts[message.chat.id]:
+        bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
+        return
+
+    # Ищем выбранное сообщение для удаления
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
+                # Удаляем сообщение из группы
                 bot.delete_message(post["chat_id"], post["message_id"])
+                # Удаляем запись о сообщении из user_posts
                 user_posts[message.chat.id].remove(post)
                 # Обновляем данные о публикациях
-                update_daily_posts(message.chat.id, post["network"], post["city"])  # Убрали аргумент 'remove'
+                update_daily_posts(message.chat.id, post["network"], post["city"])
+                # Сохраняем изменения
+                save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
+                return
             except Exception as e:
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
-            return
+                return
 
+    # Если сообщение не найдено
     bot.send_message(message.chat.id, " Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
     user_id = message.chat.id
 
-    # Проверяем, есть ли объявления у пользователя
-    if str(user_id) not in user_posts or not user_posts[str(user_id)]:
+    # Проверяем, есть ли у пользователя опубликованные сообщения
+    if user_id not in user_posts or not user_posts[user_id]:
         bot.send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
-    # Удаляем все объявления из Telegram
-    for post in user_posts[str(user_id)]:
+    # Удаляем все сообщения из групп
+    for post in user_posts[user_id]:
         try:
             bot.delete_message(post["chat_id"], post["message_id"])
         except Exception as e:
-            bot.send_message(user_id, f" Ошибка при удаления объявления: {e}")
+            bot.send_message(user_id, f" Ошибка при удалении объявления: {e}")
 
-    # Очищаем только список объявлений (user_posts)
-    user_posts[str(user_id)] = []
+    # Очищаем список объявлений пользователя
+    user_posts[user_id] = []
 
     # Сохраняем изменения
     save_data()
