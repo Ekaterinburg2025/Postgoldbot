@@ -483,16 +483,16 @@ def is_user_paid(user_id, network, city):
         print(f"Пользователь {user_id} найден в оплативших: {paid_users[user_id]}")  # Логирование
         for entry in paid_users[user_id]:
             if entry["network"] == network and entry["city"] == city:
-                expiry_date = entry["expiry_date"]
-                print(f"Срок оплата: {expiry_date}, тип: {type(expiry_date)}")  # Логирование
-                if isinstance(expiry_date, str):  # Если дата в формате строки
-                    expiry_date = datetime.fromisoformat(expiry_date)
-                elif isinstance(expiry_date, datetime):  # Если это уже объект datetime
+                end_date = entry["end_date"]  # Используем ключ 'end_date'
+                print(f"Срок оплаты: {end_date}, тип: {type(end_date)}")  # Логирование
+                if isinstance(end_date, str):  # Если дата в формате строки
+                    end_date = datetime.fromisoformat(end_date)
+                elif isinstance(end_date, datetime):  # Если это уже объект datetime
                     pass  # Ничего не делаем
                 else:
-                    print(f"Некорректный тип expiry_date: {type(expiry_date)}")
+                    print(f"Некорректный тип end_date: {type(end_date)}")
                     return False
-                if datetime.now() < expiry_date:
+                if datetime.now() < end_date:
                     print("Срок оплаты актуален.")  # Логирование
                     return True
     print("Пользователь не оплачен или срок истёк.")  # Логирование
