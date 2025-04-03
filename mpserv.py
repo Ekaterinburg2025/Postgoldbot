@@ -119,10 +119,15 @@ def save_data():
     # Преобразуем datetime в строки
     data = {
         "paid_users": {
-            user_id: {
-                "end_date": end_date.isoformat() if isinstance(end_date, datetime) else end_date
-                for user_id, end_date in paid_users.items()
-            }
+            user_id: [
+                {
+                    "end_date": entry["end_date"].isoformat() if isinstance(entry["end_date"], datetime) else entry["end_date"],
+                    "network": entry["network"],
+                    "city": entry["city"]
+                }
+                for entry in entries
+            ]
+            for user_id, entries in paid_users.items()
         },
         "user_posts": user_posts,
         "user_daily_posts": user_daily_posts,
@@ -148,10 +153,15 @@ def load_data():
         data = json.loads(result[0])
         global paid_users, user_posts, user_daily_posts, user_statistics, admins
         paid_users = {
-            user_id: {
-                "end_date": datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
-                for user_id, end_date in data.get("paid_users", {}).items()
-            }
+            user_id: [
+                {
+                    "end_date": datetime.fromisoformat(entry["end_date"]) if isinstance(entry["end_date"], str) else entry["end_date"],
+                    "network": entry["network"],
+                    "city": entry["city"]
+                }
+                for entry in entries
+            ]
+            for user_id, entries in data.get("paid_users", {}).items()
         }
         user_posts = data.get("user_posts", {})
         user_daily_posts = data.get("user_daily_posts", {})
@@ -246,10 +256,15 @@ def save_data():
     # Преобразуем datetime в строки
     data = {
         "paid_users": {
-            user_id: {
-                "end_date": end_date.isoformat() if isinstance(end_date, datetime) else end_date
-                for user_id, end_date in paid_users.items()
-            }
+            user_id: [
+                {
+                    "end_date": entry["end_date"].isoformat() if isinstance(entry["end_date"], datetime) else entry["end_date"],
+                    "network": entry["network"],
+                    "city": entry["city"]
+                }
+                for entry in entries
+            ]
+            for user_id, entries in paid_users.items()
         },
         "user_posts": user_posts,
         "user_daily_posts": user_daily_posts,
@@ -258,7 +273,7 @@ def save_data():
     }
     cur.execute(
         "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
-        (json.dumps(data),)
+        (json.dumps(data, default=str),)  # Используем default=str для сериализации datetime
     )
     conn.commit()
     cur.close()
@@ -274,10 +289,15 @@ def load_data():
         data = json.loads(result[0])
         global paid_users, user_posts, user_daily_posts, user_statistics, admins
         paid_users = {
-            user_id: {
-                "end_date": datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
-                for user_id, end_date in data.get("paid_users", {}).items()
-            }
+            user_id: [
+                {
+                    "end_date": datetime.fromisoformat(entry["end_date"]) if isinstance(entry["end_date"], str) else entry["end_date"],
+                    "network": entry["network"],
+                    "city": entry["city"]
+                }
+                for entry in entries
+            ]
+            for user_id, entries in data.get("paid_users", {}).items()
         }
         user_posts = data.get("user_posts", {})
         user_daily_posts = data.get("user_daily_posts", {})
