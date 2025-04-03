@@ -109,8 +109,14 @@ admins = [ADMIN_CHAT_ID]
 def save_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
+    # Преобразуем datetime в строки
     data = {
-        "paid_users": paid_users,
+        "paid_users": {
+            user_id: {
+                "end_date": end_date.isoformat() if isinstance(end_date, datetime) else end_date
+                for user_id, end_date in paid_users.items()
+            }
+        },
         "user_posts": user_posts,
         "user_daily_posts": user_daily_posts,
         "user_statistics": user_statistics,
@@ -134,11 +140,17 @@ def load_data():
     if result:
         data = json.loads(result[0])
         global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = data.get("paid_users", {})
+        paid_users = {
+            user_id: {
+                "end_date": datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+                for user_id, end_date in data.get("paid_users", {}).items()
+            }
+        }
         user_posts = data.get("user_posts", {})
         user_daily_posts = data.get("user_daily_posts", {})
         user_statistics = data.get("user_statistics", {})
         admins = data.get("admins", [ADMIN_CHAT_ID])
+        print("Данные загружены:", data)  # Логирование
     cur.close()
     conn.close()
 
@@ -224,8 +236,14 @@ def validate_text_length(text):
 def save_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
+    # Преобразуем datetime в строки
     data = {
-        "paid_users": paid_users,
+        "paid_users": {
+            user_id: {
+                "end_date": end_date.isoformat() if isinstance(end_date, datetime) else end_date
+                for user_id, end_date in paid_users.items()
+            }
+        },
         "user_posts": user_posts,
         "user_daily_posts": user_daily_posts,
         "user_statistics": user_statistics,
@@ -242,14 +260,18 @@ def save_data():
 def load_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    # Создаём таблицу, если она не существует
     cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
     cur.execute("SELECT data FROM bot_data WHERE id = 1")
     result = cur.fetchone()
     if result:
         data = json.loads(result[0])
         global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = data.get("paid_users", {})
+        paid_users = {
+            user_id: {
+                "end_date": datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+                for user_id, end_date in data.get("paid_users", {}).items()
+            }
+        }
         user_posts = data.get("user_posts", {})
         user_daily_posts = data.get("user_daily_posts", {})
         user_statistics = data.get("user_statistics", {})
