@@ -242,19 +242,38 @@ def is_new_day(last_post_time):
 
 def get_user_statistics(user_id):
     """Возвращает статистику публикаций для пользователя."""
-    published_today = 0
-    if str(user_id) in user_daily_posts:
-        user_data = user_daily_posts[str(user_id)]
-        for network in user_data:
-            if isinstance(user_data[network], dict):  # Проверяем, что это сеть
-                for city in user_data[network]:
-                    if isinstance(user_data[network][city], dict):  # Проверяем, что это город
-                        for post_time in user_data[network][city]["posts"]:
-                            if is_today(post_time):  # Проверяем, что публикация была сегодня
-                                published_today += 1
+    stats = {
+        "published": 0,
+        "remaining": 3,
+        "details": {}
+    }
 
-    remaining = max(0, 3 - published_today)  # Убедимся, что значение не отрицательное
-    return {"published": published_today, "remaining": remaining}
+    if user_id in user_daily_posts:
+        for network in user_daily_posts[user_id]:
+            stats["details"][network] = {}
+            for city in user_daily_posts[user_id][network]:
+                posts_today = len([
+                    post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
+                    if is_today(post_time)
+                ])
+                stats["details"][network][city] = {
+                    "published": posts_today,
+                    "remaining": max(0, 3 - posts_today)
+                }
+                stats["published"] += posts_today
+
+        # Общий лимит для режима "Все сети"
+        if "Все сети" in stats["details"]:
+            total_published = sum(
+                details["published"]
+                for network in stats["details"]
+                for city in stats["details"][network]
+            )
+            stats["remaining"] = max(0, 9 - total_published)
+        else:
+            stats["remaining"] = max(0, 3 - stats["published"])
+
+    return stats
 
 def is_today(timestamp):
     """Проверяет, что временная метка относится к текущему дню."""
@@ -407,6 +426,7 @@ def start(message):
 
 # Ограничение публикаций (3 в сутки)
 def check_daily_limit(user_id, network, city):
+    """Проверяет лимит публикаций для пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
 
@@ -422,13 +442,18 @@ def check_daily_limit(user_id, network, city):
         print(f"[DEBUG] Новый день для пользователя {user_id} в сети {network}, городе {city}.")
 
     # Проверяем лимит публикаций
-    if len(user_daily_posts[user_id][network][city]["posts"]) >= 3:
-        print(f"[DEBUG] Лимит публикаций превышен для пользователя {user_id} в сети {network}, городе {city}.")
-        return False
+    if network == "Все сети":
+        # Общий лимит для всех сетей (9 публикаций)
+        total_posts = 0
+        for net in ["Мужской Клуб", "ПАРНИ 18+", "НС"]:
+            if net in user_daily_posts[user_id] and city in user_daily_posts[user_id][net]:
+                total_posts += len(user_daily_posts[user_id][net][city]["posts"])
+        return total_posts < 9
+    else:
+        # Лимит для конкретной сети (3 публикации)
+        return len(user_daily_posts[user_id][network][city]["posts"]) < 3
 
-    return True
-
-def update_daily_posts(user_id, network, city):
+def update_daily_posts(user_id, network, city, remove=False):
     """Обновляет данные о публикациях пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
@@ -439,13 +464,21 @@ def update_daily_posts(user_id, network, city):
     if city not in user_daily_posts[user_id][network]:
         user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
 
-    # Добавляем временную метку публикации
-    post_time = datetime.now()
-    user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
-    user_daily_posts[user_id][network][city]["last_post_time"] = post_time
+    if remove:
+        # Удаляем последнюю публикацию
+        if user_daily_posts[user_id][network][city]["posts"]:
+            user_daily_posts[user_id][network][city]["posts"].pop()
+    else:
+        # Добавляем временную метку публикации
+        post_time = datetime.now()
+        user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
+        user_daily_posts[user_id][network][city]["last_post_time"] = post_time
 
     # Логирование
     print(f"[DEBUG] Обновление данных о публикациях для пользователя {user_id} в сети {network}, городе {city}.")
+
+    # Сохраняем данные
+    save_data()
 
     # Обновляем общий счётчик публикаций
     if user_id not in user_statistics:
@@ -466,8 +499,13 @@ def show_user_statistics(message):
         response = (
             f"Ваша статистика:\n"
             f"  - Опубликовано сегодня: {stats['published']}\n"
-            f"  - Осталось публикаций: {stats['remaining']}"
+            f"  - Осталось публикаций: {stats['remaining']}\n"
         )
+        if stats["details"]:
+            response += "  - Детали по сетям:\n"
+            for network, cities in stats["details"].items():
+                for city, data in cities.items():
+                    response += f"    - {network}, {city}: {data['published']} опубликовано, {data['remaining']} осталось\n"
         bot.send_message(message.chat.id, response)
     except Exception as e:
         print(f"Ошибка при получении статистики: {e}")
@@ -729,6 +767,11 @@ def show_statistics(message):
             f"  - Осталось: {user_stats['remaining']}\n"
             f"  - Ссылки: {', '.join(user_stats['links'])}\n"
         )
+        if user_stats["details"]:
+            response += "  - Детали по сетям:\n"
+            for network, cities in user_stats["details"].items():
+                for city, data in cities.items():
+                    response += f"    - {network}, {city}: {data['published']} опубликовано, {data['remaining']} осталось\n"
     bot.send_message(message.chat.id, response)
 
 # Функция для изменения срока оплаты
