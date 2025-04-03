@@ -649,15 +649,36 @@ def show_paid_users(message):
         
         response += f"Пользователь {user_name}:\n"
         for entry in entries:
-            expiry_date = entry["expiry_date"]
-            if isinstance(expiry_date, str):
-                expiry_date = datetime.fromisoformat(expiry_date)
+            end_date = entry["end_date"]
+            if isinstance(end_date, str):
+                end_date = datetime.fromisoformat(end_date)
             response += f" - Сеть: {entry['network']}, Город: {entry['city']}, " + \
-                       f"Срок: {expiry_date.strftime('%d.%m.%Y %H:%M')}\n"
+                       f"Срок: {end_date.strftime('%d.%m.%Y %H:%M')}\n"
     
     bot.send_message(message.chat.id, response)
 
-# Функция для отображения статистики
+def handle_duration_change(call):
+    try:
+        data = call.data.split("_")
+        user_id = int(data[2])
+        days = int(data[3])
+
+        if user_id not in paid_users:
+            bot.answer_callback_query(call.id, " Пользователь не найден в списке оплативших.")
+            return
+
+        for entry in paid_users[user_id]:
+            end_date = entry["end_date"]
+            if isinstance(end_date, str):  # Если дата в формате строки
+                end_date = datetime.fromisoformat(end_date)
+            entry["end_date"] = end_date + timedelta(days=days)
+
+        save_data()
+        bot.answer_callback_query(call.id, f"✅ Срок изменён на {days} дней.")
+        show_paid_users(call.message)
+    except Exception as e:
+        print(f"Ошибка в handle_duration_change: {e}")
+
 def show_statistics(message):
     if not user_statistics:
         bot.send_message(message.chat.id, "Нет данных о публикациях.")
@@ -954,7 +975,7 @@ def handle_delete_post(message):
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
                 # Обновляем данные о публикациях
-                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
+                update_daily_posts(message.chat.id, post["network"], post["city"])  # Убрали аргумент 'remove'
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
             except Exception as e:
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
