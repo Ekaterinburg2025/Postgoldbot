@@ -213,6 +213,8 @@ def validate_text_length(text):
 
 # Сохранение данных в файл
 def save_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
     data = {
         "paid_users": paid_users,
         "user_posts": user_posts,
@@ -220,19 +222,32 @@ def save_data():
         "user_statistics": user_statistics,
         "admins": admins
     }
-    with open("w", encoding="utf-8") as file:
-        json.dump(data, file, default=serialize_datetime, ensure_ascii=False, indent=4)
-    print("Данные сохранены:", data)  # Логирование
+    cur.execute(
+        "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
+        (json.dumps(data),)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def load_data():
-    if os.path.exists:
-            global paid_users, user_posts, user_daily_posts, user_statistics, admins
-            paid_users = {int(k): v for k, v in data.get("paid_users", {}).items()}
-            user_posts = data.get("user_posts", {})
-            user_daily_posts = {int(k): v for k, v in data.get("user_daily_posts", {}).items()}
-            user_statistics = data.get("user_statistics", {})
-            admins = data.get("admins", [ADMIN_CHAT_ID])
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    # Создаём таблицу, если она не существует
+    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
+    cur.execute("SELECT data FROM bot_data WHERE id = 1")
+    result = cur.fetchone()
+    if result:
+        data = json.loads(result[0])
+        global paid_users, user_posts, user_daily_posts, user_statistics, admins
+        paid_users = data.get("paid_users", {})
+        user_posts = data.get("user_posts", {})
+        user_daily_posts = data.get("user_daily_posts", {})
+        user_statistics = data.get("user_statistics", {})
+        admins = data.get("admins", [ADMIN_CHAT_ID])
         print("Данные загружены:", data)  # Логирование
+    cur.close()
+    conn.close()
 
 # Клавиатура выбора сети
 def get_network_markup():
