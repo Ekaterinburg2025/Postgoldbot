@@ -226,8 +226,6 @@ def save_data():
 
 def load_data():
     if os.path.exists:
-        with open("r", encoding="utf-8") as file:
-            data = json.load(file, object_hook=deserialize_datetime)
             global paid_users, user_posts, user_daily_posts, user_statistics, admins
             paid_users = {int(k): v for k, v in data.get("paid_users", {}).items()}
             user_posts = data.get("user_posts", {})
@@ -930,19 +928,8 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
 
 # Запуск бота
 if __name__ == '__main__':
-    load_data()  # Загружаем данные при запуске
+    # Запуск Flask на порту 8080
+    app.run(host='0.0.0.0', port=8080)
+    # Запуск бота
     print("Бот запущен...")
     bot.polling(none_stop=True, timeout=60)
-
-from flask import Flask
-
-# Создаём Flask-приложение
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-# Запускаем Flask на порту 8080
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
