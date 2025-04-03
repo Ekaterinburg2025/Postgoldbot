@@ -220,13 +220,13 @@ def save_data():
         "user_statistics": user_statistics,
         "admins": admins
     }
-    with open(DATA_FILE, "w", encoding="utf-8") as file:
+    with open("w", encoding="utf-8") as file:
         json.dump(data, file, default=serialize_datetime, ensure_ascii=False, indent=4)
     print("Данные сохранены:", data)  # Логирование
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as file:
+    if os.path.exists:
+        with open("r", encoding="utf-8") as file:
             data = json.load(file, object_hook=deserialize_datetime)
             global paid_users, user_posts, user_daily_posts, user_statistics, admins
             paid_users = {int(k): v for k, v in data.get("paid_users", {}).items()}
