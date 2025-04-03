@@ -6,6 +6,7 @@ import telebot
 from telebot import types
 import sqlite3
 from flask import Flask
+import threading
 
 # Создаём Flask-приложение
 app = Flask(__name__)
@@ -949,10 +950,19 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"Ошибка при публикации объявления: {e}")
         return None
 
-# Запуск бота
-if __name__ == '__main__':
-    # Запуск Flask на порту 8080
+# Запуск Flask в отдельном потоке
+def run_flask():
     app.run(host='0.0.0.0', port=8080)
-    # Запуск бота
+
+# Запуск бота в основном потоке
+def run_bot():
     print("Бот запущен...")
     bot.polling(none_stop=True, timeout=60)
+
+if __name__ == '__main__':
+    # Запуск Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+
+    # Запуск бота в основном потоке
+    run_bot()
