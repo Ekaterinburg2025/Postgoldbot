@@ -131,7 +131,7 @@ def save_data():
     }
     cur.execute(
         "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
-        (json.dumps(data),)
+        (json.dumps(data, default=str),)  # Используем default=str для сериализации datetime
     )
     conn.commit()
     cur.close()
