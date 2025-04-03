@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
+import sqlite3
 
 # Токен бота
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
@@ -95,8 +96,45 @@ user_statistics = {}
 # Список администраторов бота
 admins = [ADMIN_CHAT_ID]
 
-# Файл для сохранения данных
-DATA_FILE = "bot_data.json"
+# Функция для сохранения данных в SQLite
+def save_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    data = {
+        "paid_users": paid_users,
+        "user_posts": user_posts,
+        "user_daily_posts": user_daily_posts,
+        "user_statistics": user_statistics,
+        "admins": admins
+    }
+    cur.execute(
+        "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
+        (json.dumps(data),)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Функция для загрузки данных из SQLite
+def load_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
+    cur.execute("SELECT data FROM bot_data WHERE id = 1")
+    result = cur.fetchone()
+    if result:
+        data = json.loads(result[0])
+        global paid_users, user_posts, user_daily_posts, user_statistics, admins
+        paid_users = data.get("paid_users", {})
+        user_posts = data.get("user_posts", {})
+        user_daily_posts = data.get("user_daily_posts", {})
+        user_statistics = data.get("user_statistics", {})
+        admins = data.get("admins", [ADMIN_CHAT_ID])
+    cur.close()
+    conn.close()
+
+# Загружаем данные при запуске
+load_data()
 
 def serialize_datetime(obj):
     if isinstance(obj, datetime):
@@ -895,3 +933,16 @@ if __name__ == '__main__':
     load_data()  # Загружаем данные при запуске
     print("Бот запущен...")
     bot.polling(none_stop=True, timeout=60)
+
+from flask import Flask
+
+# Создаём Flask-приложение
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+# Запускаем Flask на порту 8080
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
