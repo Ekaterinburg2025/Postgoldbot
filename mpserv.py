@@ -1,4 +1,4 @@
-import os
+import os,requests,threading,time,traceback
 import json
 import sqlite3
 import logging
@@ -8,7 +8,7 @@ import telebot
 from telebot import types
 from flask import Flask, request, abort
 
-# Создаём Flask-приложение
+# логос
 app = Flask(__name__)
 
 # Настройка логирования
@@ -939,7 +939,7 @@ def select_network(message, text, media_type, file_id):
         bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
     else:
         bot.send_message(message.chat.id, " Ошибка! Выберите правильную сеть.")
-        bot.register_next_step_handler(message, process_text)
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
@@ -970,7 +970,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             elif network == "НС":
                 chat_dict = chat_ids_ns
             else:
-                continue  # Если сеть не найдена, пропускаем
+                continue
 
             if network == "НС" and city in ns_city_substitution:
                 city = ns_city_substitution[city]
@@ -992,9 +992,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                         "city": city,
                         "network": network
                     })
-                    # Обновляем количество публикаций
                     update_daily_posts(user_id, network, city)
-                    # Обновляем статистику
                     if user_id not in user_statistics:
                         user_statistics[user_id] = {"count": 0}
                     user_statistics[user_id]["count"] += 1
@@ -1011,14 +1009,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, " У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
-# Запрос на новое объявление
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
     markup.add("Да", "Нет")
     bot.send_message(message.chat.id, "Хотите опубликовать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
 
-# Обработка выбора нового объявления
 def handle_new_post_choice(message):
     if message.text.lower() == "да":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
@@ -1030,7 +1026,6 @@ def handle_new_post_choice(message):
             reply_markup=get_main_keyboard()
         )
 
-# Удаление одного объявления
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
 def delete_post(message):
     if message.chat.id not in user_posts or not user_posts[message.chat.id]:
@@ -1049,60 +1044,43 @@ def handle_delete_post(message):
         bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
 
-    # Проверяем, есть ли у пользователя опубликованные сообщения
     if message.chat.id not in user_posts or not user_posts[message.chat.id]:
         bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
         return
 
-    # Ищем выбранное сообщение для удаления
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                # Удаляем сообщение из группы
                 bot.delete_message(post["chat_id"], post["message_id"])
-                # Удаляем запись о сообщении из user_posts
                 user_posts[message.chat.id].remove(post)
-                # Обновляем данные о публикациях
                 update_daily_posts(message.chat.id, post["network"], post["city"])
-                # Сохраняем изменения
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
-
-    # Если сообщение не найдено
     bot.send_message(message.chat.id, " Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
     user_id = message.chat.id
-
-    # Проверяем, есть ли у пользователя опубликованные сообщения
     if user_id not in user_posts or not user_posts[user_id]:
         bot.send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
-    # Удаляем все сообщения из групп
     for post in user_posts[user_id]:
         try:
             bot.delete_message(post["chat_id"], post["message_id"])
         except Exception as e:
             bot.send_message(user_id, f" Ошибка при удалении объявления: {e}")
 
-    # Очищаем список объявлений пользователя
     user_posts[user_id] = []
-
-    # Сохраняем изменения
     save_data()
-
     bot.send_message(user_id, "✅ Все объявления успешно удалены.")
 
-# Функция для публикации объявления
 def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
     try:
-        # Определяем сеть и город на основе chat_id
         network = None
         city = None
 
@@ -1125,21 +1103,17 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
                     city = city_name
                     break
 
-        # Проверка лимита публикаций
         if not check_daily_limit(user_id, network, city):
             bot.send_message(user_id, f" Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
-            return None  # Завершаем процесс
+            return None
 
-        # Формируем текст объявления
         signature = network_signatures.get(network, "")
         full_text = f" Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # Создаём клавиатуру с кнопкой "Написать"
         markup = types.InlineKeyboardMarkup()
-        if not user_name.startswith("@"):  # Если нет username, добавляем кнопку "Написать"
+        if not user_name.startswith("@"):
             markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
 
-        # Публикация объявления
         if media_type == "photo":
             sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
         elif media_type == "video":
@@ -1147,7 +1121,6 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        # Обновляем данные о публикациях
         update_daily_posts(user_id, network, city)
         save_data()
 
@@ -1156,7 +1129,6 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"Ошибка при публикации объявления: {e}")
         return None
 
-# Функция для проверки подключения к Telegram API
 def check_telegram_connection():
     try:
         response = requests.get("https://api.telegram.org")
@@ -1168,7 +1140,6 @@ def check_telegram_connection():
         print(f"Ошибка при проверке подключения к Telegram API: {e}")
         return False
 
-# Запуск Flask в отдельном потоке
 def run_flask():
     try:
         app.run(host='0.0.0.0', port=8080)
@@ -1176,7 +1147,6 @@ def run_flask():
         print(f"Ошибка в Flask: {e}")
         traceback.print_exc()
 
-# Запуск бота в основном потоке
 def run_bot():
     print("Бот запущен...")
     while True:
@@ -1184,17 +1154,15 @@ def run_bot():
             bot.polling(none_stop=True, timeout=60)
         except Exception as e:
             print(f"Ошибка в bot.polling: {e}")
-            traceback.print_exc()  # Вывод полного стека ошибки
+            traceback.print_exc()
             print("Перезапуск бота через 10 секунд...")
             time.sleep(10)
 
 if __name__ == '__main__':
     if check_telegram_connection():
-        # Запуск Flask в отдельном потоке
         flask_thread = threading.Thread(target=run_flask)
         flask_thread.start()
-
-        # Запуск бота в основном потоке
         run_bot()
     else:
-        print("Нет подключения к Telegram API. Проверьте интернет-соединение.")
+        print("Нет подключения к Telegram API. Проверьте инт-соединение.")
+

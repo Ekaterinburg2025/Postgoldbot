@@ -1,1 +1,1 @@
-worker: python mpserv.py
+web: python mpserv.py
