@@ -155,28 +155,29 @@ load_data()
 # Вебхук endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Обработчик вебхука для Telegram."""
-    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([update])
-    return 'ok', 200
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        abort(403)
 
 # Установка вебхука
 def set_webhook():
-    """Устанавливает вебхук для Telegram."""
-    bot.remove_webhook()
     webhook_url = "https://postgoldbot.onrender.com/webhook"  # Ваш URL на Render
+    bot.remove_webhook()
     bot.set_webhook(url=webhook_url)
     logging.info(f"Вебхук установлен на {webhook_url}")
 
 # Запуск Flask
-def run_flask():
-    """Запускает Flask-приложение."""
-    logging.info("Flask запущен на порту 8080")
-    app.run(host='0.0.0.0', port=8080)
+@app.route('/')
+def index():
+    return 'Bot is running!'
 
 if __name__ == '__main__':
-    # Устанавливаем вебхук
     set_webhook()
+    app.run(host='0.0.0.0', port=8080)
 
     # Запускаем Flask
     run_flask()
