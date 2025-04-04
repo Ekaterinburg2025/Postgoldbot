@@ -168,10 +168,30 @@ def webhook():
 
 # Установка вебхука
 def set_webhook():
-    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Ваш URL на Render
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    logging.info(f"Вебхук установлен на {webhook_url}")
+    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
+    try:
+        bot.remove_webhook()
+        result = bot.set_webhook(url=webhook_url)
+        logging.info(f"Вебхук установлен на {webhook_url}: {result}")
+    except telebot.apihelper.ApiTelegramException as e:
+        if "Too Many Requests" in str(e):
+            # Извлекаем время ожидания, если оно указано (например, "retry after 1")
+            retry_after = 1  # Можно парсить строку ошибки, если требуется точное время
+            logging.warning(f"Получена ошибка 429, ждем {retry_after} секунду(ы) перед повторной попыткой")
+            time.sleep(retry_after)
+            try:
+                result = bot.set_webhook(url=webhook_url)
+                logging.info(f"Вебхук успешно установлен после ожидания: {result}")
+            except Exception as e2:
+                logging.error(f"Ошибка установки вебхука после повторной попытки: {e2}")
+                raise e2
+        else:
+            logging.error(f"Ошибка установки вебхука: {e}")
+            raise e
+
+if __name__ == '__main__':
+    set_webhook()  # Устанавливаем вебхук перед запуском
+    app.run(host='0.0.0.0', port=8080)
 
 # Устанавливаем вебхук при запуске
 set_webhook()
@@ -1122,7 +1142,3 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
         return None
-
-if __name__ == '__main__':
-    set_webhook()  # Устанавливаем вебхук перед запуском
-    app.run(host='0.0.0.0', port=8080)
