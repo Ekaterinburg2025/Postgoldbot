@@ -1,1 +1,1 @@
-web: python mpserv.py
+web: gunicorn mpserv:app
