@@ -1142,3 +1142,35 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
         return None
+
+# Добавляем маршрут для проверки работоспособности сервиса (если зайти по корневому URL)
+@app.route('/')
+def index():
+    return 'Bot is running!'
+
+# Эндпоинт для вебхука, куда будут приходить обновления от Telegram
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    # Логируем факт получения запроса (полезно для отладки)
+    app.logger.info("Получен запрос на вебхук")
+    
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        app.logger.info(f"Получено обновление: {json_string}")
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        abort(403)
+
+# Функция для установки вебхука
+def set_webhook():
+    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    app.logger.info(f"Вебхук установлен на {webhook_url}")
+
+# Точка входа в программу
+if __name__ == '__main__':
+    set_webhook()  # Устанавливаем вебхук перед запуском
+    app.run(host='0.0.0.0', port=8080)
