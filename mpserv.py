@@ -1123,22 +1123,6 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"Ошибка при публикации объявления: {e}")
         return None
 
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        abort(403)
-
-# Установка вебхука
-def set_webhook():
-    webhook_url = "https://your-domain.com/webhook"  # Ваш URL на Render
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    logging.info(f"Вебхук установлен на {webhook_url}")
-
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
     app.run(host='0.0.0.0', port=8080)
