@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
-from flask import Flask, request
+from flask import Flask, request, abort
 
 # Создаём Flask-приложение
 app = Flask(__name__)
@@ -115,23 +115,7 @@ user_statistics = {}
 # Список администраторов бота
 admins = [ADMIN_CHAT_ID]
 
-# Функция для сохранения данных в SQLite
-def save_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    data = {
-        "paid_users": paid_users,
-        "user_posts": user_posts,
-        "user_daily_posts": user_daily_posts,
-        "user_statistics": user_statistics,
-        "admins": admins
-    }
-    cur.execute("INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)", (json.dumps(data),))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# Функция для загрузки данных из SQLite
+# Загрузка данных при запуске
 def load_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
@@ -149,6 +133,22 @@ def load_data():
     cur.close()
     conn.close()
 
+# Сохранение данных
+def save_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    data = {
+        "paid_users": paid_users,
+        "user_posts": user_posts,
+        "user_daily_posts": user_daily_posts,
+        "user_statistics": user_statistics,
+        "admins": admins
+    }
+    cur.execute("INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)", (json.dumps(data),))
+    conn.commit()
+    cur.close()
+    conn.close()
+
 # Загружаем данные при запуске
 load_data()
 
@@ -159,7 +159,7 @@ def webhook():
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
-        return ''
+        return '', 200
     else:
         abort(403)
 
