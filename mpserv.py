@@ -1,19 +1,22 @@
 import os
 import json
+import sqlite3
+import logging
 from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
-import sqlite3
-from flask import Flask
-import threading
+from flask import Flask, request
 
 # Создаём Flask-приложение
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is running!"
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filename="bot.log"
+)
 
 # Токен бота
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
@@ -23,7 +26,7 @@ bot = telebot.TeleBot(TOKEN)
 ADMIN_CHAT_ID = 479938867  # Замените на ваш ID
 
 # Глобальные переменные
-paid_users = {}  # Инициализация глобальной переменной
+paid_users = {}
 user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
@@ -116,28 +119,14 @@ admins = [ADMIN_CHAT_ID]
 def save_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    # Преобразуем datetime в строки
     data = {
-        "paid_users": {
-            user_id: [
-                {
-                    "end_date": entry["end_date"].isoformat() if isinstance(entry["end_date"], datetime) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
-                }
-                for entry in entries
-            ]
-            for user_id, entries in paid_users.items()
-        },
+        "paid_users": paid_users,
         "user_posts": user_posts,
         "user_daily_posts": user_daily_posts,
         "user_statistics": user_statistics,
         "admins": admins
     }
-    cur.execute(
-        "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
-        (json.dumps(data, default=str),)  # Используем default=str для сериализации datetime
-    )
+    cur.execute("INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit()
     cur.close()
     conn.close()
@@ -152,27 +141,44 @@ def load_data():
     if result:
         data = json.loads(result[0])
         global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = {
-            user_id: [
-                {
-                    "end_date": datetime.fromisoformat(entry["end_date"]) if isinstance(entry["end_date"], str) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
-                }
-                for entry in entries
-            ]
-            for user_id, entries in data.get("paid_users", {}).items()
-        }
+        paid_users = data.get("paid_users", {})
         user_posts = data.get("user_posts", {})
         user_daily_posts = data.get("user_daily_posts", {})
         user_statistics = data.get("user_statistics", {})
         admins = data.get("admins", [ADMIN_CHAT_ID])
-        print("Данные загружены:", data)  # Логирование
     cur.close()
     conn.close()
 
 # Загружаем данные при запуске
 load_data()
+
+# Вебхук endpoint
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Обработчик вебхука для Telegram."""
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
+    return 'ok', 200
+
+# Установка вебхука
+def set_webhook():
+    """Устанавливает вебхук для Telegram."""
+    bot.remove_webhook()
+    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Ваш URL на Render
+    bot.set_webhook(url=webhook_url)
+    logging.info(f"Вебхук установлен на {webhook_url}")
+
+# Запуск Flask
+def run_flask():
+    """Запускает Flask-приложение."""
+    app.run(host='0.0.0.0', port=8080)
+
+if __name__ == '__main__':
+    # Устанавливаем вебхук
+    set_webhook()
+
+    # Запускаем Flask
+    run_flask()
 
 # Функция для выбора срока оплаты
 def select_duration_for_payment(message, user_id, network, city):
@@ -1148,19 +1154,45 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"Ошибка при публикации объявления: {e}")
         return None
 
+# Функция для проверки подключения к Telegram API
+def check_telegram_connection():
+    try:
+        response = requests.get("https://api.telegram.org")
+        if response.status_code == 200:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Ошибка при проверке подключения к Telegram API: {e}")
+        return False
+
 # Запуск Flask в отдельном потоке
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    try:
+        app.run(host='0.0.0.0', port=8080)
+    except Exception as e:
+        print(f"Ошибка в Flask: {e}")
+        traceback.print_exc()
 
 # Запуск бота в основном потоке
 def run_bot():
     print("Бот запущен...")
-    bot.polling(none_stop=True, timeout=60)
+    while True:
+        try:
+            bot.polling(none_stop=True, timeout=60)
+        except Exception as e:
+            print(f"Ошибка в bot.polling: {e}")
+            traceback.print_exc()  # Вывод полного стека ошибки
+            print("Перезапуск бота через 10 секунд...")
+            time.sleep(10)
 
 if __name__ == '__main__':
-    # Запуск Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
+    if check_telegram_connection():
+        # Запуск Flask в отдельном потоке
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.start()
 
-    # Запуск бота в основном потоке
-    run_bot()
+        # Запуск бота в основном потоке
+        run_bot()
+    else:
+        print("Нет подключения к Telegram API. Проверьте интернет-соединение.")
