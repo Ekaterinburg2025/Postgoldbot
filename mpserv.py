@@ -1,4 +1,7 @@
-import os,requests,threading,time,traceback
+import os
+import requests
+import threading
+import time
 import json
 import sqlite3
 import logging
@@ -170,17 +173,8 @@ def set_webhook():
     bot.set_webhook(url=webhook_url)
     logging.info(f"Вебхук установлен на {webhook_url}")
 
-# Запуск Flask
-@app.route('/')
-def index():
-    return 'Bot is running!'
-
-if __name__ == '__main__':
-    set_webhook()
-    app.run(host='0.0.0.0', port=8080)
-
-    # Запускаем Flask
-    run_flask()
+# Устанавливаем вебхук при запуске
+set_webhook()
 
 # Функция для выбора срока оплаты
 def select_duration_for_payment(message, user_id, network, city):
@@ -1129,40 +1123,22 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"Ошибка при публикации объявления: {e}")
         return None
 
-def check_telegram_connection():
-    try:
-        response = requests.get("https://api.telegram.org")
-        if response.status_code == 200:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"Ошибка при проверке подключения к Telegram API: {e}")
-        return False
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        abort(403)
 
-def run_flask():
-    try:
-        app.run(host='0.0.0.0', port=8080)
-    except Exception as e:
-        print(f"Ошибка в Flask: {e}")
-        traceback.print_exc()
-
-def run_bot():
-    print("Бот запущен...")
-    while True:
-        try:
-            bot.polling(none_stop=True, timeout=60)
-        except Exception as e:
-            print(f"Ошибка в bot.polling: {e}")
-            traceback.print_exc()
-            print("Перезапуск бота через 10 секунд...")
-            time.sleep(10)
+# Установка вебхука
+def set_webhook():
+    webhook_url = "https://your-domain.com/webhook"  # Ваш URL на Render
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    logging.info(f"Вебхук установлен на {webhook_url}")
 
 if __name__ == '__main__':
-    if check_telegram_connection():
-        flask_thread = threading.Thread(target=run_flask)
-        flask_thread.start()
-        run_bot()
-    else:
-        print("Нет подключения к Telegram API. Проверьте инт-соединение.")
-
+    set_webhook()  # Устанавливаем вебхук перед запуском
+    app.run(host='0.0.0.0', port=8080)
