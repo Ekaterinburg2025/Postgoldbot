@@ -107,7 +107,7 @@ user_daily_posts = {}
 
 # Статичные подписи для каждой сети
 network_signatures = {
-    "Мужской Клуб": "️ 🕸️Реклама. С согласования администрации сети МК.",
+    "Мужской Клуб": "️ 🕸️Реклама. Согласовано с администрацей сети МК.",
     "ПАРНИ 18+": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫",
     "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
@@ -217,11 +217,7 @@ def is_new_day(last_post_time):
 
 def get_user_statistics(user_id):
     """Возвращает статистику публикаций для пользователя."""
-    stats = {
-        "published": 0,
-        "remaining": 3,
-        "details": {}
-    }
+    stats = {"published": 0, "remaining": 9, "details": {}}
 
     if user_id in user_daily_posts:
         for network in user_daily_posts[user_id]:
@@ -233,21 +229,12 @@ def get_user_statistics(user_id):
                 ])
                 stats["details"][network][city] = {
                     "published": posts_today,
-                    "remaining": max(0, 3 - posts_today)
+                    "remaining": max(0, 3 - posts_today)  
                 }
                 stats["published"] += posts_today
 
         # Общий лимит для режима "Все сети"
-        if "Все сети" in stats["details"]:
-            total_published = sum(
-                details["published"]
-                for network in stats["details"]
-                for city in stats["details"][network]
-            )
-            stats["remaining"] = max(0, 9 - total_published)
-        else:
-            stats["remaining"] = max(0, 3 - stats["published"])
-
+        stats["remaining"] = max(0, 9 - stats["published"])
     return stats
 
 def is_today(timestamp):
@@ -735,14 +722,16 @@ def get_admin_statistics():
             )
             remaining = max(0, 9 - total_published)
         else:
-            remaining = max(0, 3 - published_today)
+            # Лимит для конкретной сети (3 публикации)
+            total_published = published_today
+            remaining = max(0, 3 - total_published)
 
         # Добавляем данные в статистику
         statistics[user_id] = {
-            "published": published_today,
-            "remaining": remaining,
-            "links": links,
-            "details": details
+            "published": published_today,  # Общее количество публикаций
+            "remaining": remaining,  # Оставшиеся публикации
+            "links": links,  # Ссылки на сообщения
+            "details": details  # Детализация по сетям и городам
         }
     return statistics
 
