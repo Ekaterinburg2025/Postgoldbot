@@ -66,6 +66,44 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Загрузка данных при старте
+def load_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    # Загружаем оплативших пользователей
+    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+    paid_users = {}
+    for user_id, network, city, end_date in cur.fetchall():
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": datetime.fromisoformat(end_date)
+        })
+
+    # Загружаем админов
+    cur.execute("SELECT user_id FROM admin_users")
+    admin_users = [row[0] for row in cur.fetchall()]
+
+    # Загружаем публикации
+    cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+    user_posts = {}
+    for user_id, network, city, time, chat_id, message_id in cur.fetchall():
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "network": network,
+            "city": city,
+            "time": time,
+            "chat_id": chat_id,
+            "message_id": message_id
+        })
+
+    conn.close()
+    return paid_users, admin_users, user_posts
+
 # Инициализация и загрузка данных
 init_db()
 paid_users, admin_users, user_posts = load_data()
@@ -146,45 +184,6 @@ network_signatures = {
     "ПАРНИ 18+": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫",
     "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
-
-# Загрузка данных при старте
-paid_users, admin_users, user_posts = load_data()
-def load_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-
-    # Загружаем оплативших пользователей
-    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
-    paid_users = {}
-    for user_id, network, city, end_date in cur.fetchall():
-        if user_id not in paid_users:
-            paid_users[user_id] = []
-        paid_users[user_id].append({
-            "network": network,
-            "city": city,
-            "end_date": datetime.fromisoformat(end_date)
-        })
-
-    # Загружаем админов
-    cur.execute("SELECT user_id FROM admin_users")
-    admin_users = [row[0] for row in cur.fetchall()]
-
-    # Загружаем публикации
-    cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
-    user_posts = {}
-    for user_id, network, city, time, chat_id, message_id in cur.fetchall():
-        if user_id not in user_posts:
-            user_posts[user_id] = []
-        user_posts[user_id].append({
-            "network": network,
-            "city": city,
-            "time": time,
-            "chat_id": chat_id,
-            "message_id": message_id
-        })
-
-    conn.close()
-    return paid_users, admin_users, user_posts
 
 # Вызов при старте бота
 init_db()
