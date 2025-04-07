@@ -223,15 +223,22 @@ def get_user_statistics(user_id):
         for network in user_daily_posts[user_id]:
             stats["details"][network] = {}
             for city in user_daily_posts[user_id][network]:
-                posts_today = len([
+                # Считаем активные и удалённые публикации
+                active_posts = len([
                     post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
                     if is_today(post_time)
                 ])
+                deleted_posts = len([
+                    post_time for post_time in user_daily_posts[user_id][network][city]["deleted_posts"]
+                    if is_today(post_time)
+                ])
+                total_posts = active_posts + deleted_posts
+
                 stats["details"][network][city] = {
-                    "published": posts_today,
-                    "remaining": max(0, 3 - posts_today)  
+                    "published": total_posts,  # Все публикации (активные + удалённые)
+                    "remaining": max(0, 3 - total_posts)  # Оставшиеся публикации
                 }
-                stats["published"] += posts_today
+                stats["published"] += total_posts
 
         # Общий лимит для режима "Все сети"
         stats["remaining"] = max(0, 9 - stats["published"])
@@ -396,24 +403,37 @@ def check_daily_limit(user_id, network, city):
         user_daily_posts[user_id][network] = {}
 
     if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
+        user_daily_posts[user_id][network][city] = {
+            "posts": [],
+            "deleted_posts": [],
+            "last_post_time": None
+        }
 
     # Проверяем, наступил ли новый день
     if is_new_day(user_daily_posts[user_id][network][city]["last_post_time"]):
-        user_daily_posts[user_id][network][city]["posts"] = []
+        user_daily_posts[user_id][network][city]["posts"] = []  # Сбрасываем активные публикации
+        user_daily_posts[user_id][network][city]["deleted_posts"] = []  # Сбрасываем удалённые публикации
         print(f"[DEBUG] Новый день для пользователя {user_id} в сети {network}, городе {city}.")
 
-    # Проверяем лимит публикаций
+    # Считаем активные и удалённые публикации
+    active_posts = len([
+        post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
+        if is_today(post_time)
+    ])
+    deleted_posts = len([
+        post_time for post_time in user_daily_posts[user_id][network][city]["deleted_posts"]
+        if is_today(post_time)
+    ])
+    total_posts = active_posts + deleted_posts
+
+    # Проверяем лимит
     if network == "Все сети":
         # Общий лимит для всех сетей (9 публикаций)
-        total_posts = 0
-        for net in ["Мужской Клуб", "ПАРНИ 18+", "НС"]:
-            if net in user_daily_posts[user_id] and city in user_daily_posts[user_id][net]:
-                total_posts += len(user_daily_posts[user_id][net][city]["posts"])
         return total_posts < 9
     else:
         # Лимит для конкретной сети (3 публикации)
-        return len(user_daily_posts[user_id][network][city]["posts"]) < 3
+        return total_posts < 3
+
 
 def update_daily_posts(user_id, network, city, remove=False):
     """Обновляет данные о публикациях пользователя."""
@@ -424,20 +444,22 @@ def update_daily_posts(user_id, network, city, remove=False):
         user_daily_posts[user_id][network] = {}
 
     if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
+        user_daily_posts[user_id][network][city] = {
+            "posts": [],  # Активные публикации
+            "deleted_posts": [],  # Удалённые публикации
+            "last_post_time": None
+        }
 
     if remove:
-        # Удаляем последнюю публикацию
+        # Перемещаем последнюю публикацию в список удалённых
         if user_daily_posts[user_id][network][city]["posts"]:
-            user_daily_posts[user_id][network][city]["posts"].pop()
+            deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
+            user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
     else:
         # Добавляем временную метку публикации
         post_time = datetime.now()
         user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
         user_daily_posts[user_id][network][city]["last_post_time"] = post_time
-
-    # Логирование
-    print(f"[DEBUG] Обновление данных о публикациях для пользователя {user_id} в сети {network}, городе {city}.")
 
     # Сохраняем данные
     save_data()
@@ -735,6 +757,7 @@ def get_admin_statistics():
         }
     return statistics
 
+
 @bot.message_handler(commands=['statistics'])
 def show_statistics(message):
     if message.chat.id not in admins:
@@ -1009,7 +1032,7 @@ def handle_delete_post(message):
             try:
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
-                update_daily_posts(message.chat.id, post["network"], post["city"])
+                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)  # Обновляем статистику
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
@@ -1017,6 +1040,7 @@ def handle_delete_post(message):
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
     bot.send_message(message.chat.id, " Объявление не найдено.")
+
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
