@@ -1134,9 +1134,7 @@ def index():
 # Эндпоинт для вебхука, куда будут приходить обновления от Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Логируем факт получения запроса (полезно для отладки)
     app.logger.info("Получен запрос на вебхук")
-    
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         app.logger.info(f"Получено обновление: {json_string}")
