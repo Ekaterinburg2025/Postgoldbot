@@ -113,6 +113,7 @@ network_signatures = {
 }
 
 # Инициализация базы данных
+# Инициализация базы данных
 def init_db():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
@@ -129,7 +130,16 @@ def init_db():
             user_id INTEGER PRIMARY KEY
         )
     """)
-
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_posts (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            time TEXT,
+            chat_id INTEGER,
+            message_id INTEGER
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -213,46 +223,6 @@ your_timezone = pytz.timezone("Europe/Moscow")
 # Пример использования
 now = datetime.now(your_timezone)
 print(now)
-
-# Загружаем админов
-admin_users = load_admin_users()
-
-# Загружаем оплативших пользователей
-paid_users = load_paid_users()
-
-# Загрузка данных при запуске
-def load_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
-    cur.execute("SELECT data FROM bot_data WHERE id = 1")
-    result = cur.fetchone()
-    if result:
-        data = json.loads(result[0])
-        global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = data.get("paid_users", {})
-        user_posts = data.get("user_posts", {})
-        user_daily_posts = data.get("user_daily_posts", {})
-        user_statistics = data.get("user_statistics", {})
-        admins = data.get("admins", [ADMIN_CHAT_ID])
-    cur.close()
-    conn.close()
-
-# Сохранение данных
-def save_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    data = {
-        "paid_users": paid_users,
-        "user_posts": user_posts,
-        "user_daily_posts": user_daily_posts,
-        "user_statistics": user_statistics,
-        "admins": admins
-    }
-    cur.execute("INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)", (json.dumps(data),))
-    conn.commit()
-    cur.close()
-    conn.close()
 
 # Загружаем данные при запуске
 load_data()
@@ -349,10 +319,9 @@ def get_user_statistics(user_id):
     return stats
 
 def is_today(timestamp):
-    """Проверяет, что временная метка относится к текущему дню."""
-    if isinstance(timestamp, str):
-        timestamp = datetime.fromisoformat(timestamp)
-    return timestamp.date() == datetime.now().date()
+    """Проверяет, относится ли временная метка к сегодняшнему дню."""
+    now = datetime.now()
+    return datetime.fromisoformat(timestamp).date() == now.date()
 
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
@@ -385,61 +354,79 @@ def validate_text_length(text):
 
 # Сохранение данных в файл
 def save_data():
+    """Сохраняет данные в базу данных."""
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    # Преобразуем datetime в строки
-    data = {
-        "paid_users": {
-            user_id: [
-                {
-                    "end_date": entry["end_date"],  # Убедитесь, что 'end_date' существует
-                    "network": entry["network"],    # Ключ 'network'
-                    "city": entry["city"]           # Ключ 'city'
-                }
-                for entry in entries
-            ]
-            for user_id, entries in paid_users.items()
-        },
-        "user_posts": user_posts,
-        "user_daily_posts": user_daily_posts,
-        "user_statistics": user_statistics,
-        "admins": admins
-    }
-    cur.execute(
-        "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
-        (json.dumps(data, default=str),)  # Используем default=str для сериализации datetime
-    )
+
+    # Очищаем таблицы
+    cur.execute("DELETE FROM paid_users")
+    cur.execute("DELETE FROM admin_users")
+    cur.execute("DELETE FROM user_posts")
+
+    # Сохраняем оплативших пользователей
+    for user_id, entries in paid_users.items():
+        for entry in entries:
+            cur.execute("""
+                INSERT INTO paid_users (user_id, network, city, end_date)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+
+    # Сохраняем админов
+    for user_id in admin_users:
+        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+
+    # Сохраняем публикации
+    for user_id, posts in user_posts.items():
+        for post in posts:
+            cur.execute("""
+                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
+
     conn.commit()
-    cur.close()
     conn.close()
+    print("[DEBUG] Данные сохранены.")
 
 def load_data():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
-    cur.execute("SELECT data FROM bot_data WHERE id = 1")
-    result = cur.fetchone()
-    if result:
-        data = json.loads(result[0])
-        global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = {
-            user_id: [
-                {
-                    "end_date": datetime.fromisoformat(entry["end_date"]) if isinstance(entry["end_date"], str) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
-                }
-                for entry in entries
-            ]
-            for user_id, entries in data.get("paid_users", {}).items()
-        }
-        user_posts = data.get("user_posts", {})
-        user_daily_posts = data.get("user_daily_posts", {})
-        user_statistics = data.get("user_statistics", {})
-        admins = data.get("admins", [ADMIN_CHAT_ID])
-        print("Данные загружены:", data)  # Логирование
-    cur.close()
+
+    # Загружаем оплативших пользователей
+    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+    paid_users = {}
+    for user_id, network, city, end_date in cur.fetchall():
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": datetime.fromisoformat(end_date)
+        })
+
+    # Загружаем админов
+    cur.execute("SELECT user_id FROM admin_users")
+    admin_users = [row[0] for row in cur.fetchall()]
+
+    # Загружаем публикации
+    cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+    user_posts = {}
+    for user_id, network, city, time, chat_id, message_id in cur.fetchall():
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "network": network,
+            "city": city,
+            "time": time,
+            "chat_id": chat_id,
+            "message_id": message_id
+        })
+
     conn.close()
+    return paid_users, admin_users, user_posts
+
+# Инициализация и загрузка данных
+init_db()
+paid_users, admin_users, user_posts = load_data()
 
 # Клавиатура выбора сети
 def get_network_markup():
