@@ -35,11 +35,11 @@ def webhook():
         logging.exception("Ошибка при обработке webhook: %s", e)
     return "OK", 200
 
-@app.before_first_request
-def setup():
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+
+    # Установка webhook перед запуском сервера
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
     print("✅ Webhook установлен:", WEBHOOK_URL)
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
