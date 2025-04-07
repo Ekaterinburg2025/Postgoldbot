@@ -324,25 +324,28 @@ def is_new_day(last_post_time):
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
+    """Возвращает статистику публикаций для пользователя."""
     stats = {"published": 0, "remaining": 9, "details": {}}
 
     if user_id in user_daily_posts:
         for network in user_daily_posts[user_id]:
             stats["details"][network] = {}
             for city in user_daily_posts[user_id][network]:
+                # Считаем активные и удалённые публикации
                 active_posts = len(user_daily_posts[user_id][network][city]["posts"])
                 deleted_posts = len(user_daily_posts[user_id][network][city]["deleted_posts"])
                 total_posts = active_posts + deleted_posts
 
                 stats["details"][network][city] = {
-                    "published": total_posts,
-                    "remaining": max(0, 3 - total_posts)
+                    "published": total_posts,  # Все публикации (активные + удалённые)
+                    "remaining": max(0, 3 - total_posts)  # Оставшиеся публикации
                 }
                 stats["published"] += total_posts
 
         # Общий лимит для режима "Все сети"
         stats["remaining"] = max(0, 9 - stats["published"])
 
+    print(f"[DEBUG] Статистика для пользователя {user_id}: {stats}")
     return stats
 
 def is_today(timestamp):
@@ -537,6 +540,7 @@ def check_daily_limit(user_id, network, city):
 
 
 def update_daily_posts(user_id, network, city, remove=False):
+    """Обновляет данные о публикациях пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
 
@@ -551,15 +555,20 @@ def update_daily_posts(user_id, network, city, remove=False):
         }
 
     if remove:
+        # Перемещаем последнюю публикацию в список удалённых
         if user_daily_posts[user_id][network][city]["posts"]:
             deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
             user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
+            print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
     else:
+        # Добавляем временную метку публикации
         post_time = datetime.now().isoformat()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
-        user_daily_posts[user_id][network][city]["last_post_time"] = datetime.now()
+            user_daily_posts[user_id][network][city]["last_post_time"] = datetime.now()
+            print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
 
+    # Сохраняем данные
     save_data()
 
     # Обновляем общий счётчик публикаций
@@ -812,6 +821,7 @@ def show_statistics(message):
     bot.send_message(message.chat.id, response)
 
 def get_admin_statistics():
+    """Возвращает статистику публикаций для админа."""
     statistics = {}
     for user_id, posts in user_posts.items():
         published_today = 0
@@ -853,6 +863,7 @@ def get_admin_statistics():
             "details": details
         }
 
+    print(f"[DEBUG] Статистика для админа: {statistics}")
     return statistics
 
 @bot.message_handler(commands=['statistics'])
