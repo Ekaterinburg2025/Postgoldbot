@@ -1170,7 +1170,8 @@ def set_webhook():
     bot.set_webhook(url=webhook_url)
     app.logger.info(f"Вебхук установлен на {webhook_url}")
 
-# Точка входа в программу
-if __name__ == '__main__':
-    set_webhook()  # Устанавливаем вебхук перед запуском
-    app.run(host='0.0.0.0', port=8080)
+# Установка вебхука при старте приложения
+with app.app_context():
+    webhook_url = "https://your-subdomain.onrender.com/webhook"  # заменишь на свой
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
