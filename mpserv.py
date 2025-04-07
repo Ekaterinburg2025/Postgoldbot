@@ -1122,7 +1122,7 @@ def webhook():
     else:
         abort(403)
 
-# Функция для установки вебхука
+# Определение функции set_webhook
 def set_webhook():
     try:
         bot.remove_webhook()
@@ -1131,7 +1131,7 @@ def set_webhook():
     except Exception as e:
         app.logger.error(f"Ошибка при установке вебхука: {e}")
 
-# Точка входа в программу
+# Запуск Flask
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
     app.run(host='0.0.0.0', port=8080)
