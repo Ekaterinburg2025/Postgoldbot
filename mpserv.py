@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
-from flask import Flask, request, abort
+from flask import Flask, request, abortimport threading
+
 
 # Создаём Flask-приложение
 app = Flask(__name__)
@@ -106,6 +107,9 @@ def load_data():
 
 # Инициализация базы данных
 init_db()
+
+# Добавляем блокировку для синхронизации доступа к базе данных
+db_lock = threading.Lock()
 
 # Загрузка данных при старте
 paid_users, admin_users, user_posts = load_data()
@@ -210,19 +214,31 @@ def load_paid_users():
     return paid_users
 
 def add_paid_user(user_id, network, city, end_date):
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-
     # Преобразуем время в UTC
     end_date_utc = end_date.astimezone(pytz.UTC)
 
-    cur.execute("""
-        INSERT INTO paid_users (user_id, network, city, end_date)
-        VALUES (?, ?, ?, ?)
-    """, (user_id, network, city, end_date_utc.isoformat()))
+    # Добавляем пользователя в список оплативших
+    if user_id not in paid_users:
+        paid_users[user_id] = []
+    paid_users[user_id].append({
+        "network": network,
+        "city": city,
+        "end_date": end_date_utc.isoformat()
+    })
 
-    conn.commit()
-    conn.close()
+    save_data()
+
+    # Уведомление админу
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(user_id, f"✅ Вы добавлены в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
+
+def add_admin_user(user_id):
+    # Добавляем пользователя в список администраторов
+    if user_id not in admin_users:
+        admin_users.append(user_id)
+        save_data()
+        bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+        bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
 def remove_paid_user(user_id):
     conn = sqlite3.connect("bot_data.db")
@@ -401,37 +417,38 @@ def validate_text_length(text):
 # Сохранение данных в файл
 def save_data():
     """Сохраняет данные в базу данных."""
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
+    with db_lock:  # Используем блокировку
+        conn = sqlite3.connect("bot_data.db")
+        cur = conn.cursor()
 
-    # Очищаем таблицы
-    cur.execute("DELETE FROM paid_users")
-    cur.execute("DELETE FROM admin_users")
-    cur.execute("DELETE FROM user_posts")
+        # Очищаем таблицы
+        cur.execute("DELETE FROM paid_users")
+        cur.execute("DELETE FROM admin_users")
+        cur.execute("DELETE FROM user_posts")
 
-    # Сохраняем оплативших пользователей
-    for user_id, entries in paid_users.items():
-        for entry in entries:
-            cur.execute("""
-                INSERT INTO paid_users (user_id, network, city, end_date)
-                VALUES (?, ?, ?, ?)
-            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+        # Сохраняем оплативших пользователей
+        for user_id, entries in paid_users.items():
+            for entry in entries:
+                cur.execute("""
+                    INSERT INTO paid_users (user_id, network, city, end_date)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
-    # Сохраняем админов
-    for user_id in admin_users:
-        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+        # Сохраняем админов
+        for user_id in admin_users:
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-    # Сохраняем публикации
-    for user_id, posts in user_posts.items():
-        for post in posts:
-            cur.execute("""
-                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
+        # Сохраняем публикации
+        for user_id, posts in user_posts.items():
+            for post in posts:
+                cur.execute("""
+                    INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
 
-    conn.commit()
-    conn.close()
-    print("[DEBUG] Данные сохранены.")
+        conn.commit()
+        conn.close()
+        print("[DEBUG] Данные сохранены.")
 
 # Клавиатура выбора сети
 def get_network_markup():
@@ -553,14 +570,14 @@ def update_daily_posts(user_id, network, city, remove=False):
             print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
     else:
         # Добавляем временную метку публикации
-        post_time = datetime.now().isoformat()
+        post_time = get_current_time()
         if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
-            user_daily_posts[user_id][network][city]["last_post_time"] = datetime.now()
+            user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
             print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
 
-    # Сохраняем данные
     save_data()
+    print(f"[DEBUG] Данные сохранены для пользователя {user_id}.")
 
     # Обновляем общий счётчик публикаций
     if user_id not in user_statistics:
@@ -1068,8 +1085,6 @@ def handle_delete_post(message):
     if message.chat.id not in user_posts or not user_posts[message.chat.id]:
         bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
         return
-
-    print(f"[DEBUG] Удаление объявления для пользователя {message.chat.id}.")  # Логирование
 
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
