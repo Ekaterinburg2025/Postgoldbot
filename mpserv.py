@@ -149,14 +149,6 @@ def save_data():
 # Загружаем данные при запуске
 load_data()
 
-# Запуск Flask
-if __name__ == '__main__':
-    set_webhook()  # Устанавливаем вебхук перед запуском
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
-# Устанавливаем вебхук при запуске
-set_webhook()
-
 # Функция для выбора срока оплаты
 def select_duration_for_payment(message, user_id, network, city):
     if message.text == "Назад":
