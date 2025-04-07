@@ -149,28 +149,6 @@ def save_data():
 # Загружаем данные при запуске
 load_data()
 
-# Вебхук endpoint с логированием
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    app.logger.info("Получен запрос на вебхук")
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        app.logger.info(f"Получено обновление: {json_string}")
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        abort(403)
-
-# Установка вебхука с логированием
-def set_webhook():
-    try:
-        bot.remove_webhook()
-        result = bot.set_webhook(url=WEBHOOK_URL)
-        app.logger.info(f"Вебхук установлен на {WEBHOOK_URL}: {result}")
-    except Exception as e:
-        app.logger.error(f"Ошибка при установке вебхука: {e}")
-
 # Запуск Flask
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
@@ -1146,20 +1124,14 @@ def webhook():
 
 # Функция для установки вебхука
 def set_webhook():
-    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    app.logger.info(f"Вебхук установлен на {webhook_url}")
+    try:
+        bot.remove_webhook()
+        result = bot.set_webhook(url=WEBHOOK_URL)
+        app.logger.info(f"Вебхук установлен на {WEBHOOK_URL}: {result}")
+    except Exception as e:
+        app.logger.error(f"Ошибка при установке вебхука: {e}")
 
 # Точка входа в программу
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
     app.run(host='0.0.0.0', port=8080)
-
-# Flask-приложение
-app = Flask(__name__)
-
-# Запуск Flask-сервера
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
