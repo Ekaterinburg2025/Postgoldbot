@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
-from flask import Flask, request, abortimport threading
+from flask import Flask, request, abort
+import threading
 
 
 # Создаём Flask-приложение
