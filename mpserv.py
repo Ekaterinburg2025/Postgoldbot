@@ -472,9 +472,10 @@ def update_daily_posts(user_id, network, city, remove=False):
             user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
     else:
         # Добавляем временную метку публикации
-        post_time = datetime.now()
-        user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
-        user_daily_posts[user_id][network][city]["last_post_time"] = post_time
+        post_time = datetime.now().isoformat()
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
+            user_daily_posts[user_id][network][city]["posts"].append(post_time)
+        user_daily_posts[user_id][network][city]["last_post_time"] = datetime.now()
 
     # Сохраняем данные
     save_data()
@@ -771,7 +772,6 @@ def get_admin_statistics():
             "details": details  # Детализация по сетям и городам
         }
     return statistics
-
 
 @bot.message_handler(commands=['statistics'])
 def show_statistics(message):
