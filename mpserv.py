@@ -1,4 +1,6 @@
 import os
+
+import os
 import requests
 import threading
 import time
@@ -1170,8 +1172,33 @@ def set_webhook():
     bot.set_webhook(url=webhook_url)
     app.logger.info(f"Вебхук установлен на {webhook_url}")
 
-# Установка вебхука при старте приложения
-with app.app_context():
-    webhook_url = "https://your-subdomain.onrender.com/webhook"  # заменишь на свой
+# Точка входа в программу
+if __name__ == '__main__':
+    set_webhook()  # Устанавливаем вебхук перед запуском
+    app.run(host='0.0.0.0', port=8080)
+
+
+# === Автоматическая установка вебхука ===
+
+from flask import request, abort
+import telebot
+
+WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
+TOKEN = os.getenv('BOT_TOKEN')  # Получаем токен из переменной окружения
+
+bot = telebot.TeleBot(TOKEN)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        abort(403)
+
+if __name__ == '__main__':
     bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
+    bot.set_webhook(url=WEBHOOK_URL)
+    app.run(host='0.0.0.0', port=8080)
