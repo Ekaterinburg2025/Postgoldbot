@@ -1,47 +1,46 @@
+import os
 import logging
-import asyncio
 from flask import Flask, request
 from aiogram import Bot, Dispatcher, types
-import os
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Update
+import asyncio
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+TOKEN = os.getenv("BOT_TOKEN")
 
-# Bot init
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "ТУТ_ТВОЙ_ТОКЕН"  # <-- НЕ ЗАБУДЬ УКАЗАТЬ ТОКЕН
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
-# Flask app
+# 👇 Регистрируем бота в диспетчере
+dp["bot"] = bot
+
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    json_data = request.get_json(force=True)
-    logger.info("📩 Пришёл апдейт: %s", json_data)
-
     try:
-        update = types.Update(**json_data)
-        asyncio.run(dp.process_update(update))
+        json_data = request.get_json(force=True)
+        update = Update.model_validate(json_data)  # aiogram 3.x
+        asyncio.run(dp.feed_update(bot, update))
     except Exception as e:
-        logger.exception("❌ Ошибка при обработке webhook: %s", e)
-
+        logging.exception("Ошибка при обработке webhook: %s", e)
     return "OK", 200
 
-@app.route("/", methods=["GET"])
-def root():
-    return "Бот запущен и ждёт webhook!", 200
-
-# Простейший хендлер для теста
+# 👋 Простой хендлер
 @dp.message()
-async def handle_message(message: types.Message):
-    await message.answer("👋 Привет! Я жив!")
+async def echo_handler(message: types.Message):
+    await message.answer("✅ Бот работает!")
 
 if __name__ == "__main__":
-    # Установка webhook (по необходимости)
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL") or "https://postgoldbot.onrender.com/webhook"
-    asyncio.run(bot.set_webhook(WEBHOOK_URL))
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    WEBHOOK_HOST = os.getenv("WEBHOOK_URL") or "https://postgoldbot.onrender.com"
+    WEBHOOK_PATH = "/webhook"
+    WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
+    async def on_startup():
+        await bot.set_webhook(WEBHOOK_URL)
+        print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+
+    asyncio.run(on_startup())
     app.run(host="0.0.0.0", port=10000)
