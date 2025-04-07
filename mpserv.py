@@ -24,6 +24,7 @@ async def handle_start(message: types.Message):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     json_data = request.get_json(force=True)
+    print("📩 Пришёл апдейт:", json_data)  # ВАЖНО: логируем апдейт
     update = types.Update(**json_data)
     try:
         loop = asyncio.get_event_loop()
