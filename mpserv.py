@@ -698,48 +698,6 @@ def select_city_for_payment(message, user_id, network):
     bot.send_message(message.chat.id, " Выберите срок оплаты:", reply_markup=markup)
     bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
 
-# Функция для выбора срока оплаты
-def select_duration_for_payment(message, user_id, network, city):
-    if message.text == "Назад":
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        if network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif network == "НС":
-            cities = list(chat_ids_ns.keys())
-        markup.add(*cities)
-        markup.add("Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
-        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
-        return
-
-    duration = message.text
-    if duration == "День":
-        days = 1
-    elif duration == "Неделя":
-        days = 7
-    elif duration == "Месяц":
-        days = 30
-    else:
-        bot.send_message(message.chat.id, " Ошибка! Выберите правильный срок.")
-        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
-        return
-
-    expiry_date = datetime.now() + timedelta(days=days)
-
-    if user_id not in paid_users:
-        paid_users[user_id] = []  # Инициализируем список, если он отсутствует
-
-    # Добавляем данные с ключом 'end_date'
-    paid_users[user_id].append({
-        "end_date": expiry_date.isoformat(),  # Используем isoformat для сериализации
-        "network": network,
-        "city": city
-    })
-    save_data()  # Сохраняем данные
-    bot.send_message(message.chat.id, f" ✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
-
 # Функция для добавления администратора
 def add_admin_step(message):
     try:
