@@ -170,7 +170,7 @@ def webhook():
 
 # Установка вебхука
 def set_webhook():
-    webhook_url = "https://postgoldbot.onrender.com"  # Замените на актуальный URL вашего сервера
+    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
     try:
         bot.remove_webhook()
         result = bot.set_webhook(url=webhook_url)
