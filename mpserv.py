@@ -124,8 +124,101 @@ def init_db():
             end_date TEXT
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_users (
+            user_id INTEGER PRIMARY KEY
+        )
+    """)
+
     conn.commit()
     conn.close()
+
+# Вызов при старте бота
+init_db()
+
+def load_paid_users():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+    paid_users = {}
+
+    for user_id, network, city, end_date in cur.fetchall():
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": datetime.fromisoformat(end_date)
+        })
+
+    conn.close()
+    return paid_users
+
+def add_paid_user(user_id, network, city, end_date):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    # Преобразуем время в UTC
+    end_date_utc = end_date.astimezone(pytz.UTC)
+
+    cur.execute("""
+        INSERT INTO paid_users (user_id, network, city, end_date)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, network, city, end_date_utc.isoformat()))
+
+    conn.commit()
+    conn.close()
+
+def remove_paid_user(user_id):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM paid_users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def load_admin_users():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("SELECT user_id FROM admin_users")
+    admin_users = [row[0] for row in cur.fetchall()]
+
+    conn.close()
+    return admin_users
+
+def add_admin_user(user_id):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+def remove_admin_user(user_id):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM admin_users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def is_admin(user_id):
+    return user_id in admin_users
+
+# Установите ваш часовой пояс
+your_timezone = pytz.timezone("Europe/Moscow")
+
+# Пример использования
+now = datetime.now(your_timezone)
+print(now)
+
+# Загружаем админов
+admin_users = load_admin_users()
+
+# Загружаем оплативших пользователей
+paid_users = load_paid_users()
 
 # Загрузка данных при запуске
 def load_data():
@@ -231,32 +324,25 @@ def is_new_day(last_post_time):
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
-    """Возвращает статистику публикаций для пользователя."""
     stats = {"published": 0, "remaining": 9, "details": {}}
 
     if user_id in user_daily_posts:
         for network in user_daily_posts[user_id]:
             stats["details"][network] = {}
             for city in user_daily_posts[user_id][network]:
-                # Считаем активные и удалённые публикации
-                active_posts = len([
-                    post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
-                    if is_today(post_time)
-                ])
-                deleted_posts = len([
-                    post_time for post_time in user_daily_posts[user_id][network][city]["deleted_posts"]
-                    if is_today(post_time)
-                ])
+                active_posts = len(user_daily_posts[user_id][network][city]["posts"])
+                deleted_posts = len(user_daily_posts[user_id][network][city]["deleted_posts"])
                 total_posts = active_posts + deleted_posts
 
                 stats["details"][network][city] = {
-                    "published": total_posts,  # Все публикации (активные + удалённые)
-                    "remaining": max(0, 3 - total_posts)  # Оставшиеся публикации
+                    "published": total_posts,
+                    "remaining": max(0, 3 - total_posts)
                 }
                 stats["published"] += total_posts
 
         # Общий лимит для режима "Все сети"
         stats["remaining"] = max(0, 9 - stats["published"])
+
     return stats
 
 def is_today(timestamp):
@@ -451,7 +537,6 @@ def check_daily_limit(user_id, network, city):
 
 
 def update_daily_posts(user_id, network, city, remove=False):
-    """Обновляет данные о публикациях пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
 
@@ -466,18 +551,15 @@ def update_daily_posts(user_id, network, city, remove=False):
         }
 
     if remove:
-        # Перемещаем последнюю публикацию в список удалённых
         if user_daily_posts[user_id][network][city]["posts"]:
             deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
             user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
     else:
-        # Добавляем временную метку публикации
         post_time = datetime.now().isoformat()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
         user_daily_posts[user_id][network][city]["last_post_time"] = datetime.now()
 
-    # Сохраняем данные
     save_data()
 
     # Обновляем общий счётчик публикаций
@@ -732,7 +814,6 @@ def show_statistics(message):
 def get_admin_statistics():
     statistics = {}
     for user_id, posts in user_posts.items():
-        # Получаем количество публикаций за сегодня
         published_today = 0
         links = []
         details = {}
@@ -766,11 +847,12 @@ def get_admin_statistics():
 
         # Добавляем данные в статистику
         statistics[user_id] = {
-            "published": published_today,  # Общее количество публикаций
-            "remaining": remaining,  # Оставшиеся публикации
-            "links": links,  # Ссылки на сообщения
-            "details": details  # Детализация по сетям и городам
+            "published": published_today,
+            "remaining": remaining,
+            "links": links,
+            "details": details
         }
+
     return statistics
 
 @bot.message_handler(commands=['statistics'])
