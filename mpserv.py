@@ -532,7 +532,6 @@ def check_daily_limit(user_id, network, city):
 
 
 def update_daily_posts(user_id, network, city, remove=False):
-    """Обновляет данные о публикациях пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
 
@@ -771,7 +770,6 @@ def show_statistics(message):
     bot.send_message(message.chat.id, response)
 
 def get_admin_statistics():
-    """Возвращает статистику публикаций для админа."""
     statistics = {}
     for user_id, posts in user_posts.items():
         published_today = 0
@@ -1087,6 +1085,7 @@ def handle_delete_post(message):
                 print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
+
     bot.send_message(message.chat.id, " Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
@@ -1098,8 +1097,11 @@ def delete_all_posts(message):
 
     for post in user_posts[user_id]:
         try:
+            print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
             bot.delete_message(post["chat_id"], post["message_id"])
+            update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
+            print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
             bot.send_message(user_id, f" Ошибка при удалении объявления: {e}")
 
     user_posts[user_id] = []
