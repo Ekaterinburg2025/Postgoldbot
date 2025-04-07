@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import os
@@ -1176,3 +1177,28 @@ def set_webhook():
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
     app.run(host='0.0.0.0', port=8080)
+
+
+
+# Flask-приложение
+app = Flask(__name__)
+
+# Webhook путь
+@app.route('/webhook', methods=["POST"])
+def webhook():
+    update = types.Update(**request.get_json(force=True))
+    asyncio.run(dp.process_update(update))
+    return "OK"
+
+# Установка webhook при первом запросе
+@app.before_first_request
+def set_webhook():
+    host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+    webhook_url = f"https://{host}/webhook"
+    asyncio.run(bot.set_webhook(webhook_url))
+    print(f"Webhook установлен: {webhook_url}")
+
+# Запуск Flask-сервера
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
