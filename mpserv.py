@@ -1,38 +1,47 @@
-
-import os
 import logging
 import asyncio
-
 from flask import Flask, request
 from aiogram import Bot, Dispatcher, types
+import os
 
+# Logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-WEBHOOK_URL = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook"
-
+# Bot init
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "ТУТ_ТВОЙ_ТОКЕН"  # <-- НЕ ЗАБУДЬ УКАЗАТЬ ТОКЕН
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+# Flask app
 app = Flask(__name__)
-
-@dp.message_handler(commands=['start'])
-async def handle_start(message: types.Message):
-    await message.reply("✅ Бот работает через Webhook!")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    update = Update(**request.json)
-    Bot.set_current(bot)  # <-- добавь вот эту строку
-    asyncio.run(dp.process_update(update))
+    json_data = request.get_json(force=True)
+    logger.info("📩 Пришёл апдейт: %s", json_data)
+
+    try:
+        update = types.Update(**json_data)
+        asyncio.run(dp.process_update(update))
+    except Exception as e:
+        logger.exception("❌ Ошибка при обработке webhook: %s", e)
+
     return "OK", 200
 
+@app.route("/", methods=["GET"])
+def root():
+    return "Бот запущен и ждёт webhook!", 200
+
+# Простейший хендлер для теста
+@dp.message()
+async def handle_message(message: types.Message):
+    await message.answer("👋 Привет! Я жив!")
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-
-    # Установка webhook перед запуском сервера
+    # Установка webhook (по необходимости)
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL") or "https://postgoldbot.onrender.com/webhook"
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
-    print("✅ Webhook установлен:", WEBHOOK_URL)
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
