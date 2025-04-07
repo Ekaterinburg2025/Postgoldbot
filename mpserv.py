@@ -23,13 +23,9 @@ async def handle_start(message: types.Message):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    json_data = request.get_json(force=True)
-    print("📩 Пришёл апдейт:", json_data)
-    update = types.Update(**json_data)
-    try:
-        asyncio.run(dp.process_update(update))  # КРИТИЧЕСКАЯ ИСПРАВЛЕННАЯ СТРОКА
-    except Exception as e:
-        logging.exception("Ошибка при обработке webhook: %s", e)
+    update = Update(**request.json)
+    Bot.set_current(bot)  # <-- добавь вот эту строку
+    asyncio.run(dp.process_update(update))
     return "OK", 200
 
 if __name__ == "__main__":
