@@ -1137,16 +1137,17 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         signature = network_signatures.get(network, "")
         full_text = f" Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-markup = types.InlineKeyboardMarkup()
-if not user_name.startswith("@"):
-    markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
+        markup = types.InlineKeyboardMarkup()
+        if not user_name.startswith("@"):
+            markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
 
-if media_type == "photo":
-    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
-elif media_type == "video":
-    sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
-else:
-    sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
+        if media_type == "photo":
+            sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
+        elif media_type == "video":
+            sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
+        else:
+            sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
+
         # Сохраняем данные о сообщении
         if user_id not in user_posts:
             user_posts[user_id] = []
