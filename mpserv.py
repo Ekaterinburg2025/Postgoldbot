@@ -1186,9 +1186,18 @@ app = Flask(__name__)
 # Webhook путь
 @app.route('/webhook', methods=["POST"])
 def webhook():
-    update = types.Update(**request.get_json(force=True))
-    asyncio.run(dp.process_update(update))
-    return "OK"
+    json_data = request.get_json(force=True)
+    update = types.Update(**json_data)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(dp.process_update(update))
+        else:
+            loop.run_until_complete(dp.process_update(update))
+    except Exception as e:
+        logging.exception("Ошибка при обработке webhook: %s", e)
+
+    return "OK", 200
 
 # Установка webhook при первом запросе
 @app.before_first_request
