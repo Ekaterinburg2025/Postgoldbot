@@ -302,16 +302,18 @@ def select_duration_for_payment(message, user_id, network, city):
     expiry_date = datetime.now() + timedelta(days=days)
 
     if user_id not in paid_users:
-        paid_users[user_id] = []  # Инициализируем список, если он отсутствует
+        paid_users[user_id] = []
 
-    # Добавляем данные с ключом 'end_date'
     paid_users[user_id].append({
-        "end_date": expiry_date.isoformat(),  # Используем isoformat для сериализации
+        "end_date": expiry_date.isoformat(),
         "network": network,
         "city": city
     })
-    save_data()  # Сохраняем данные
-    bot.send_message(message.chat.id, f" ✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    save_data()
+
+    # Уведомление админу
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(message.chat.id, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
 
 def serialize_datetime(obj):
     if isinstance(obj, datetime):
@@ -1018,21 +1020,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
                 if sent_message:
-                    if message.chat.id not in user_posts:
-                        user_posts[message.chat.id] = []
-                    user_posts[message.chat.id].append({
-                        "message_id": sent_message.message_id,
-                        "chat_id": chat_id,
-                        "time": datetime.now(),
-                        "city": city,
-                        "network": network
-                    })
-                    update_daily_posts(user_id, network, city)
-                    if user_id not in user_statistics:
-                        user_statistics[user_id] = {"count": 0}
-                    user_statistics[user_id]["count"] += 1
-                    save_data()
-                    bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             else:
                 bot.send_message(message.chat.id, f" Ошибка! Город '{city}' не найден в сети «{network}».")
         ask_for_new_post(message)
@@ -1083,9 +1071,12 @@ def handle_delete_post(message):
         bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
         return
 
+    print(f"[DEBUG] Удаление объявления для пользователя {message.chat.id}.")  # Логирование
+
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
+                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
                 update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
@@ -1093,6 +1084,7 @@ def handle_delete_post(message):
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
     bot.send_message(message.chat.id, " Объявление не найдено.")
@@ -1154,13 +1146,20 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         elif media_type == "video":
             sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
         else:
-            sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
+        sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        update_daily_posts(user_id, network, city)
+        # Сохраняем данные о сообщении
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "message_id": sent_message.message_id,
+            "chat_id": chat_id,
+            "time": datetime.now(),
+            "city": city,
+            "network": network
+        })
         save_data()
-
-        # Логируем успешную публикацию
-        print(f"[DEBUG] Объявление опубликовано в сети {network}, город {city}, chat_id {chat_id}.")
+        print(f"[DEBUG] Сообщение сохранено: user_id={user_id}, chat_id={chat_id}, message_id={sent_message.message_id}")  # Логирование
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
