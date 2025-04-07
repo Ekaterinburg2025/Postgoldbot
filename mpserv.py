@@ -104,8 +104,10 @@ def load_data():
     conn.close()
     return paid_users, admin_users, user_posts
 
-# Инициализация и загрузка данных
+# Инициализация базы данных
 init_db()
+
+# Загрузка данных при старте
 paid_users, admin_users, user_posts = load_data()
 
 # Списки chat_id для каждой сети и города
@@ -1086,7 +1088,7 @@ def handle_delete_post(message):
             try:
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
-                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)  # Обновляем статистику
+                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
@@ -1094,7 +1096,6 @@ def handle_delete_post(message):
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
     bot.send_message(message.chat.id, " Объявление не найдено.")
-
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
@@ -1158,6 +1159,8 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         update_daily_posts(user_id, network, city)
         save_data()
 
+        # Логируем успешную публикацию
+        print(f"[DEBUG] Объявление опубликовано в сети {network}, город {city}, chat_id {chat_id}.")
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
