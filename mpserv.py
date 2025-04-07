@@ -1,3 +1,4 @@
+# Импорты
 import os
 import json
 import sqlite3
@@ -34,6 +35,40 @@ user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
 admins = [ADMIN_CHAT_ID]
+
+# Инициализация базы данных
+def init_db():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS paid_users (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            end_date TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_users (
+            user_id INTEGER PRIMARY KEY
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_posts (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            time TEXT,
+            chat_id INTEGER,
+            message_id INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+# Инициализация и загрузка данных
+init_db()
+paid_users, admin_users, user_posts = load_data()
 
 # Списки chat_id для каждой сети и города
 chat_ids_mk = {
@@ -112,9 +147,6 @@ network_signatures = {
     "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
 
-# Инициализация и загрузка данных
-init_db()
-
 # Загрузка данных при старте
 paid_users, admin_users, user_posts = load_data()
 def load_data():
@@ -153,36 +185,6 @@ def load_data():
 
     conn.close()
     return paid_users, admin_users, user_posts
-
-# Инициализация базы данных
-def init_db():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS paid_users (
-            user_id INTEGER,
-            network TEXT,
-            city TEXT,
-            end_date TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS admin_users (
-            user_id INTEGER PRIMARY KEY
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS user_posts (
-            user_id INTEGER,
-            network TEXT,
-            city TEXT,
-            time TEXT,
-            chat_id INTEGER,
-            message_id INTEGER
-        )
-    """)
-    conn.commit()
-    conn.close()
 
 # Вызов при старте бота
 init_db()
