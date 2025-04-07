@@ -112,6 +112,21 @@ network_signatures = {
     "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
 
+# Инициализация базы данных
+def init_db():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS paid_users (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            end_date TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 # Загрузка данных при запуске
 def load_data():
     conn = sqlite3.connect("bot_data.db")
