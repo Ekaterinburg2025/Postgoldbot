@@ -25,6 +25,9 @@ bot = telebot.TeleBot(TOKEN)
 # URL вебхука
 WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
 
+# Админ ID (ваш ID)
+ADMIN_CHAT_ID = 479938867  # Замените на ваш ID
+
 # Глобальные переменные
 paid_users = {}
 user_posts = {}
