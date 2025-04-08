@@ -521,11 +521,14 @@ def format_time(timestamp):
     return local_time.strftime("%H:%M, %d %B %Y")
 
 def is_new_day(last_post_time):
-    """Проверяет, наступил ли новый день."""
     if last_post_time is None:
-        return True  # Если last_post_time отсутствует, считаем, что новый день
-current_time = datetime.now(ekaterinburg_tz)
-print(current_time)
+        return True
+
+    if isinstance(last_post_time, str):
+        last_post_time = datetime.fromisoformat(last_post_time)
+
+    current_time = datetime.now(ekaterinburg_tz)
+    print(current_time)
     return current_time.date() > last_post_time.date()
 
 # Получение имени пользователя
