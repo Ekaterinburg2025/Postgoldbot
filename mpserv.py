@@ -273,11 +273,10 @@ def add_admin_user(user_id):
 def remove_paid_user(user_id, network, city):
     with db_lock:
         with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM paid_users WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM paid_users WHERE user_id = ?", (user_id,))
+            conn.commit()
+            # Закрытие соединения не обязательно, так как `with` автоматически закроет его
 
 def load_admin_users():
     with db_lock:
