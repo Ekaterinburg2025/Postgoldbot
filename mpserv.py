@@ -218,6 +218,19 @@ def add_paid_user(user_id, network, city, end_date):
     # Преобразуем время в UTC
     end_date_utc = end_date.astimezone(pytz.UTC)
 
+def check_user_subscription(user_id):
+    if user_id not in paid_users:
+        return False
+    
+    now = datetime.now()
+    for entry in paid_users[user_id]:
+        end_date = entry["end_date"]
+        if isinstance(end_date, str):
+            end_date = datetime.fromisoformat(end_date)
+        if now < end_date:
+            return True
+    return False
+
     # Добавляем пользователя в список оплативших
     if user_id not in paid_users:
         paid_users[user_id] = []
@@ -558,8 +571,8 @@ def update_daily_posts(user_id, network, city, remove=False):
 
     if city not in user_daily_posts[user_id][network]:
         user_daily_posts[user_id][network][city] = {
-            "posts": [],  # Активные публикации
-            "deleted_posts": [],  # Удалённые публикации
+            "posts": [],
+            "deleted_posts": [],
             "last_post_time": None
         }
 
@@ -572,7 +585,7 @@ def update_daily_posts(user_id, network, city, remove=False):
     else:
         # Добавляем временную метку публикации
         post_time = get_current_time()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
             user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
             print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
@@ -1090,7 +1103,14 @@ def handle_delete_post(message):
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
+                # Проверяем существует ли сообщение
+                try:
+                    bot.get_chat_member(post["chat_id"], bot.get_me().id)
+                except telebot.apihelper.ApiException as e:
+                    if "chat not found" in str(e) or "message not found" in str(e):
+                        bot.send_message(message.chat.id, "Сообщение уже удалено.")
+                        continue
+                
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
                 update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
@@ -1098,7 +1118,7 @@ def handle_delete_post(message):
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
-                print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
 
@@ -1165,6 +1185,12 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
             sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
+if sent_message:
+            bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+            return sent_message
+    except Exception as e:
+        print(f"Ошибка при публикации объявления: {e}")
+        return None
 
         # Сохраняем данные о сообщении
         if user_id not in user_posts:
