@@ -5,7 +5,6 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta
 import pytz
-import pytz
 import telebot
 from telebot import types
 from flask import Flask, request, abort
@@ -25,9 +24,6 @@ logging.basicConfig(
 # Токен бота
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
 bot = telebot.TeleBot(TOKEN)
-
-# Часовой пояс Екатеринбург
-tz = pytz.timezone('Asia/Yekaterinburg')
 
 # URL вебхука
 WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
@@ -320,7 +316,7 @@ def select_duration_for_payment(message, user_id, network, city):
         bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
         return
 
-    expiry_date = datetime.now(tz) + timedelta(days=days)
+    expiry_date = datetime.now() + timedelta(days=days)
 
     if user_id not in paid_users:
         paid_users[user_id] = []
@@ -357,7 +353,7 @@ def is_new_day(last_post_time):
     if isinstance(last_post_time, str):
         last_post_time = datetime.fromisoformat(last_post_time)
 
-    current_time = datetime.now(tz)
+    current_time = datetime.now()
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
@@ -387,7 +383,7 @@ def get_user_statistics(user_id):
 
 def is_today(timestamp):
     """Проверяет, относится ли временная метка к сегодняшнему дню."""
-    now = datetime.now(tz)
+    now = datetime.now()
     return datetime.fromisoformat(timestamp).date() == now.date()
 
 def check_payment(user_id, network, city):
@@ -398,7 +394,7 @@ def check_payment(user_id, network, city):
 
     for payment in paid_users[str(user_id)]:
         # Проверяем, не истёк ли срок оплаты
-        if payment["expiry_date"] < datetime.now(tz):
+        if payment["expiry_date"] < datetime.now():
             print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
             continue  # Пропускаем истёкшие платежи
 
@@ -477,7 +473,7 @@ def is_new_day(last_post_time):
     """Проверяет, наступил ли новый день."""
     if last_post_time is None:
         return True  # Если last_post_time отсутствует, считаем, что новый день
-    current_time = datetime.now(tz)
+    current_time = datetime.now()
     return current_time.date() > last_post_time.date()
 
 # Получение имени пользователя
@@ -634,7 +630,7 @@ def is_user_paid(user_id, network, city):
                 else:
                     print(f"Некорректный тип end_date: {type(end_date)}")
                     return False
-                if datetime.now(tz) < end_date:
+                if datetime.now() < end_date:
                     print("Срок оплаты актуален.")  # Логирование
                     return True
     print("Пользователь не оплачен или срок истёк.")  # Логирование
@@ -1094,13 +1090,10 @@ def handle_delete_post(message):
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
-                bot.delete_message(post['chat_id'], post['message_id'])
-            except telebot.apihelper.ApiTelegramException as e:
-                if 'message to delete not found' in str(e):
-                    pass
-                else:
-                    raise
+                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
+                bot.delete_message(post["chat_id"], post["message_id"])
+                user_posts[message.chat.id].remove(post)
+                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
@@ -1121,13 +1114,7 @@ def delete_all_posts(message):
     for post in user_posts[user_id]:
         try:
             print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
-            try:
-                bot.delete_message(post["chat_id"], post["message_id"])
-            except telebot.apihelper.ApiTelegramException as e:
-                if 'message to delete not found' in str(e):
-                    pass
-                else:
-                    raise
+            bot.delete_message(post["chat_id"], post["message_id"])
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
             print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
@@ -1185,7 +1172,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         user_posts[user_id].append({
             "message_id": sent_message.message_id,
             "chat_id": chat_id,
-            "time": datetime.now(tz),
+            "time": datetime.now(),
             "city": city,
             "network": network
         })
