@@ -9,6 +9,7 @@ import telebot
 from telebot import types
 from flask import Flask, request, abort
 import threading
+from pytz import timezone
 tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
 
 def get_current_time():
