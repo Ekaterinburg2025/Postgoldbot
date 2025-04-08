@@ -281,34 +281,28 @@ def remove_paid_user(user_id, network, city):
 def load_admin_users():
     with db_lock:
         with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
-
-    cur.execute("SELECT user_id FROM admin_users")
-    admin_users = [row[0] for row in cur.fetchall()]
-
-    conn.close()
-    return admin_users
+            cur = conn.cursor()
+            cur.execute("SELECT user_id FROM admin_users")
+            admin_users = [row[0] for row in cur.fetchall()]
+            return admin_users  # Возвращаем список администраторов
 
 def add_admin_user(user_id):
     with db_lock:
         with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
-
-    cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
+            cur = conn.cursor()
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+            conn.commit()
 
 def remove_admin_user(user_id):
     with db_lock:
         with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM admin_users WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM admin_users WHERE user_id = ?", (user_id,))
+            conn.commit()
 
 def is_admin(user_id):
-    return user_id in admin_users
+    admin_users = load_admin_users()  # Загружаем список администраторов
+    return user_id in admin_users  # Проверяем, есть ли пользователь в списке
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
