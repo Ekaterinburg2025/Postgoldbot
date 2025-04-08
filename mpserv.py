@@ -1147,9 +1147,21 @@ def handle_delete_post(message):
     for post in list(user_posts[user_id]):
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
+                # Проверяем, существует ли сообщение
+                try:
+                    bot.get_chat(post["chat_id"])
+                except Exception as e:
+                    print(f"[DEBUG] Сообщение уже удалено: {e}")
+                    user_posts[user_id].remove(post)
+                    update_daily_posts(user_id, post["network"], post["city"], remove=True)
+                    save_data()
+                    bot.send_message(user_id, "✅ Объявление уже удалено.")
+                    return
+
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[user_id].remove(post)
                 update_daily_posts(user_id, post["network"], post["city"], remove=True)
+                save_data()
                 bot.send_message(user_id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
@@ -1203,7 +1215,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
                     break
 
         if not check_daily_limit(user_id, network, city):
-            bot.send_message(user_id, f" Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+            bot.send_message(user_id, f"Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
             return None
 
         signature = network_signatures.get(network, "")
