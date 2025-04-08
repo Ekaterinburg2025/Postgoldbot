@@ -680,7 +680,9 @@ def show_user_statistics(message):
 
 # Проверка оплаты пользователя
 def is_user_paid(user_id, network, city):
-    user_id = str(user_id)  # Всегда приводим к строке
+    if isinstance(user_id, str):
+        user_id = int(user_id)  # Приводим к int, как в основной логике
+
     print(f"[DEBUG] Проверяем оплату: user_id={user_id}, network={network}, city={city}")
 
     if user_id not in paid_users:
