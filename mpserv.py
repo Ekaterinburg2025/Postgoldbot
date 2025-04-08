@@ -680,40 +680,36 @@ def show_user_statistics(message):
 
 # Проверка оплаты пользователя
 def is_user_paid(user_id, network, city):
-    if isinstance(user_id, str):  # Если ID передаётся как строка
-        user_id = int(user_id)
-
-    print(f"Проверяем оплату для пользователя {user_id}, сеть {network}, город {city}")  # Логирование
+    user_id = str(user_id)  # Всегда приводим к строке
+    print(f"[DEBUG] Проверяем оплату: user_id={user_id}, network={network}, city={city}")
 
     if user_id not in paid_users:
-        print("Пользователь не найден в словаре оплативших.")
+        print("[DEBUG] Пользователь не найден в словаре оплаченных.")
         return False
 
     for entry in paid_users[user_id]:
         if entry["network"] == network and entry["city"] == city:
             end_date = entry["end_date"]
-            print(f"Срок оплаты: {end_date}, тип: {type(end_date)}")  # Логирование
+            print(f"[DEBUG] Найдено совпадение. Срок оплаты: {end_date}")
 
-            # Преобразуем дату, если она строка
             if isinstance(end_date, str):
                 try:
                     end_date = datetime.fromisoformat(end_date)
                 except ValueError:
-                    print("Ошибка в формате даты.")
+                    print("[DEBUG] Ошибка формата даты.")
                     return False
 
             if not isinstance(end_date, datetime):
-                print(f"Некорректный тип end_date: {type(end_date)}")
+                print(f"[DEBUG] end_date неправильного типа: {type(end_date)}")
                 return False
 
-            # Точная проверка времени (а не просто даты)
             if datetime.now() < end_date:
-                print("Срок оплаты актуален.")  # Логирование
+                print("[DEBUG] Оплата актуальна.")
                 return True
             else:
-                print("Подписка закончилась.")
+                print("[DEBUG] Срок подписки истёк.")
 
-    print("Подходящего тарифа не найдено или срок истёк.")
+    print("[DEBUG] Не найдено подходящего тарифа или срок закончился.")
     return False
 
 # Админ-панель
