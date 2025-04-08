@@ -5,6 +5,7 @@ import sqlite3
 import logging
 import threading
 from datetime import datetime, timedelta
+from collections import defaultdict
 import pytz
 import telebot
 from telebot import types
@@ -300,15 +301,26 @@ def is_admin(user_id):
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
-    """Возвращает количество уникальных комбинаций "сеть + город" для пользователя."""
-    if user_id not in paid_users:
+    """Считает количество уникальных комбинаций сетей и городов для пользователя."""
+    if user_id not in user_daily_posts:
         return 0
 
     unique_combinations = set()
-    for entry in paid_users[user_id]:
-        unique_combinations.add((entry["network"], entry["city"]))
+    for network, cities in user_daily_posts[user_id].items():
+        for city in cities:
+            unique_combinations.add((network, city))
 
     return len(unique_combinations)
+
+def is_new_day(last_post_time):
+    """Проверяет, наступил ли новый день."""
+    if last_post_time is None:
+        return True
+    return last_post_time.date() < datetime.now().date()
+
+def is_today(post_time):
+    """Проверяет, было ли время публикации сегодня."""
+    return post_time.date() == datetime.now().date()
 
 # Установите ваш часовой пояс
 your_timezone = pytz.timezone("Asia/Yekaterinburg")
@@ -556,21 +568,17 @@ def start(message):
     except Exception as e:
         bot.send_message(ADMIN_CHAT_ID, f"Ошибка в /start: {e}")
 
-# Ограничение публикаций (3 в сутки)
+from collections import defaultdict
+
 def check_daily_limit(user_id, network, city):
     """Проверяет лимит публикаций для пользователя."""
+    # Инициализация данных, если их нет
     if user_id not in user_daily_posts:
-        user_daily_posts[user_id] = {}
-
-    if network not in user_daily_posts[user_id]:
-        user_daily_posts[user_id][network] = {}
-
-    if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {
+        user_daily_posts[user_id] = defaultdict(lambda: defaultdict(lambda: {
             "posts": [],
             "deleted_posts": [],
             "last_post_time": None
-        }
+        }))
 
     # Проверяем, наступил ли новый день
     if is_new_day(user_daily_posts[user_id][network][city]["last_post_time"]):
@@ -579,14 +587,8 @@ def check_daily_limit(user_id, network, city):
         print(f"[DEBUG] Новый день для пользователя {user_id} в сети {network}, городе {city}.")
 
     # Считаем активные и удалённые публикации
-    active_posts = len([
-        post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
-        if is_today(post_time)
-    ])
-    deleted_posts = len([
-        post_time for post_time in user_daily_posts[user_id][network][city]["deleted_posts"]
-        if is_today(post_time)
-    ])
+    active_posts = sum(1 for post_time in user_daily_posts[user_id][network][city]["posts"] if is_today(post_time))
+    deleted_posts = sum(1 for post_time in user_daily_posts[user_id][network][city]["deleted_posts"] if is_today(post_time))
     total_posts = active_posts + deleted_posts
 
     # Определяем лимит
@@ -606,8 +608,9 @@ def check_daily_limit(user_id, network, city):
         return total_posts < limit
 
 def update_daily_posts(user_id, network, city, remove=False):
-    try:
-        with db_lock:
+    """Обновляет статистику публикаций."""
+    with db_lock:  # Используем блокировку
+        try:
             if user_id not in user_daily_posts:
                 user_daily_posts[user_id] = {}
 
@@ -627,10 +630,10 @@ def update_daily_posts(user_id, network, city, remove=False):
             else:
                 user_daily_posts[user_id][network][city]["posts"].append(current_time)
                 print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
-    except Exception as e:
-        print(f"[ERROR] Ошибка при обновлении статистики: {e}")
-    finally:
-        save_data()
+
+            save_data()  # Сохраняем данные
+        except Exception as e:
+            print(f"[ERROR] Ошибка при обновлении статистики: {e}")
 
 @bot.message_handler(commands=['my_stats'])
 def show_user_statistics(message):
