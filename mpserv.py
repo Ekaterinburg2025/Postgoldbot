@@ -9,7 +9,7 @@ import telebot
 from telebot import types
 from flask import Flask, request, abort
 from telebot.apihelper import ApiTelegramException
-import threading
+from threading import Lock
 from pytz import timezone
 tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
 
@@ -60,6 +60,7 @@ user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
 admins = [ADMIN_CHAT_ID]
+db_lock = Lock()
 
 # Инициализация базы данных
 def init_db():
@@ -238,29 +239,27 @@ def load_paid_users():
     return paid_users
 
 def add_paid_user(user_id, network, city, end_date):
-    paid_users[user_id].append({"network": network, "city": city, "end_date": end_date})
-    save_data()
-    safe_send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
+    with db_lock:  
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": end_date
+        })
+        save_data()
 
-    # Добавляем пользователя в список оплативших
-    if user_id not in paid_users:
-        paid_users[user_id] = []
-    paid_users[user_id].append({
-        "network": network,
-        "city": city,
-        "end_date": end_date_utc.isoformat()
-    })
-
-    save_data()
-
-    # Уведомление админу
     bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
     bot.send_message(user_id, f"✅ Вы добавлены в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
 
 def add_admin_user(user_id):
-    admins.append(user_id)
-    save_data()
-    safe_send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+    with db_lock:
+        if user_id not in admins:
+            admins.append(user_id)
+            save_data()
+
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+    bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
 def remove_paid_user(user_id):
     conn = sqlite3.connect("bot_data.db")
@@ -299,8 +298,20 @@ def remove_admin_user(user_id):
 def is_admin(user_id):
     return user_id in admin_users
 
+# Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
+def count_unique_networks_cities(user_id):
+    """Возвращает количество уникальных комбинаций "сеть + город" для пользователя."""
+    if user_id not in paid_users:
+        return 0
+
+    unique_combinations = set()
+    for entry in paid_users[user_id]:
+        unique_combinations.add((entry["network"], entry["city"]))
+
+    return len(unique_combinations)
+
 # Установите ваш часовой пояс
-your_timezone = pytz.timezone("Europe/Moscow")
+your_timezone = pytz.timezone("Asia/Yekaterinburg")
 
 # Пример использования
 now = datetime.now(your_timezone)
@@ -579,14 +590,21 @@ def check_daily_limit(user_id, network, city):
     ])
     total_posts = active_posts + deleted_posts
 
+    # Определяем лимит
+    unique_combinations = count_unique_networks_cities(user_id)
+    if unique_combinations == 0:
+        return False  # Пользователь не оплатил ни одного города
+
+    # Лимит = 3 * количество уникальных комбинаций, но не более 9
+    limit = min(3 * unique_combinations, 9)
+
     # Проверяем лимит
     if network == "Все сети":
         # Общий лимит для всех сетей (9 публикаций)
         return total_posts < 9
     else:
         # Лимит для конкретной сети (3 публикации)
-        return total_posts < 3
-
+        return total_posts < limit
 
 def update_daily_posts(user_id, network, city, remove=False):
     if user_id not in user_daily_posts:
@@ -1138,12 +1156,16 @@ def handle_delete_post(message):
     for post in list(user_posts[user_id]):
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                bot.delete_message(post["chat_id"], post["message_id"])
-                user_posts[user_id].remove(post)
-                update_daily_posts(user_id, post["network"], post["city"], remove=True)
+                with db_lock:  # Блокировка для работы с базой
+                    bot.delete_message(post["chat_id"], post["message_id"])
+                    user_posts[user_id].remove(post)
+                    update_daily_posts(user_id, post["network"], post["city"], remove=True)
+                    save_data()  # Сохраняем данные
+
                 bot.send_message(user_id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")
                 bot.send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
                 return
 
@@ -1211,20 +1233,24 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        if user_id not in user_posts:
-            user_posts[user_id] = []
-        user_posts[user_id].append({
-            "message_id": sent_message.message_id,
-            "chat_id": chat_id,
-            "time": datetime.now(),
-            "city": city,
-            "network": network
-        })
-        update_daily_posts(user_id, network, city)
-        save_data()
+        with db_lock:  # Блокировка для работы с базой
+            if user_id not in user_posts:
+                user_posts[user_id] = []
+            user_posts[user_id].append({
+                "message_id": sent_message.message_id,
+                "chat_id": chat_id,
+                "time": datetime.now(),
+                "city": city,
+                "network": network
+            })
+            update_daily_posts(user_id, network, city)
+            save_data()
+
+        bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
+        bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
         return None
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
