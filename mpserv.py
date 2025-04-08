@@ -1161,25 +1161,15 @@ def handle_delete_post(message):
     for post in list(user_posts[user_id]):
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                with db_lock:  # Блокировка для работы с базой
-                    # Пытаемся удалить сообщение
-                    bot.delete_message(post["chat_id"], post["message_id"])
-                    # Убираем пост из списка пользователя
-                    user_posts[user_id].remove(post)
-                    # Обновляем статистику
-                    update_daily_posts(user_id, post["network"], post["city"], remove=True)
-                    # Сохраняем данные
-                    save_data()
-
-                # Уведомляем пользователя об успешном удалении
+                bot.delete_message(post["chat_id"], post["message_id"])
+                user_posts[user_id].remove(post)
+                update_daily_posts(user_id, post["network"], post["city"], remove=True)
                 bot.send_message(user_id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
-                print(f"[ERROR] Ошибка при удалении объявления: {e}")
                 bot.send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
                 return
 
-    # Если пост не найден
     bot.send_message(user_id, "Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
@@ -1255,13 +1245,9 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         })
         update_daily_posts(user_id, network, city)
         save_data()
-
-        # Уведомляем пользователя об успешной публикации
-        bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
-        bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
         return None
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
