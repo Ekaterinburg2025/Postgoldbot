@@ -1126,8 +1126,8 @@ def delete_all_posts(message):
             except telebot.apihelper.ApiTelegramException as e:
                 if 'message to delete not found' in str(e):
                     pass
-    else:
-        raise
+                else:
+                    raise
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
             print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
