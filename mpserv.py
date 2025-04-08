@@ -9,7 +9,22 @@ import telebot
 from telebot import types
 from flask import Flask, request, abort
 import threading
+tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
 
+def get_current_time():
+    return datetime.now(tz).isoformat()
+
+def parse_time(iso_str):
+    return datetime.fromisoformat(iso_str).astimezone(tz)
+
+def is_today(iso_str):
+    try:
+        dt = parse_time(iso_str)
+        now = datetime.now(tz)
+        return dt.date() == now.date()
+    except Exception as e:
+        print(f"[ERROR] Ошибка в is_today: {e}")
+        return False
 
 # Создаём Flask-приложение
 app = Flask(__name__)
@@ -24,6 +39,12 @@ logging.basicConfig(
 # Токен бота
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
 bot = telebot.TeleBot(TOKEN)
+
+def safe_send_message(chat_id, text, **kwargs):
+    try:
+        bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        print(f"[Ошибка отправки сообщения] chat_id={chat_id} — {e}")
 
 # URL вебхука
 WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
@@ -312,7 +333,7 @@ def select_duration_for_payment(message, user_id, network, city):
     elif duration == "Месяц":
         days = 30
     else:
-        bot.send_message(message.chat.id, " Ошибка! Выберите правильный срок.")
+        bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильный срок.")
         bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
         return
 
@@ -328,9 +349,26 @@ def select_duration_for_payment(message, user_id, network, city):
     })
     save_data()
 
+    # Получаем имя пользователя для админа
+    try:
+        user_info = bot.get_chat(user_id)
+        user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
+        if not user_name:
+            user_name = user_info.username or "Имя не указано"
+    except Exception as e:
+        user_name = "Имя не найдено"
+
     # Уведомление админу
-    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
-    bot.send_message(message.chat.id, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(
+        ADMIN_CHAT_ID,
+        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+    )
+
+    # Уведомление текущему администратору в боте
+    bot.send_message(
+        message.chat.id,
+        f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+    )
 
 def serialize_datetime(obj):
     if isinstance(obj, datetime):
@@ -460,7 +498,8 @@ def get_network_markup():
 # Основная клавиатура
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления")
+    markup.add("Создать новое объявление", "Удалить объявление")
+    markup.add("Удалить все объявления", "📊 Моя статистика")
     return markup
 
 # Форматирование времени
@@ -558,34 +597,29 @@ def update_daily_posts(user_id, network, city, remove=False):
 
     if city not in user_daily_posts[user_id][network]:
         user_daily_posts[user_id][network][city] = {
-            "posts": [],  # Активные публикации
-            "deleted_posts": [],  # Удалённые публикации
+            "posts": [],
+            "deleted_posts": [],
             "last_post_time": None
         }
 
     if remove:
-        # Перемещаем последнюю публикацию в список удалённых
         if user_daily_posts[user_id][network][city]["posts"]:
             deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
             user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
             print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
     else:
-        # Добавляем временную метку публикации
         post_time = get_current_time()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
             user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
             print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
 
-    save_data()
-    print(f"[DEBUG] Данные сохранены для пользователя {user_id}.")
+            # Счётчик увеличивается только при публикации
+            if user_id not in user_statistics:
+                user_statistics[user_id] = {"count": 0}
+            user_statistics[user_id]["count"] += 1
+            print(f"[DEBUG] Счётчик увеличен: user_id={user_id}, count={user_statistics[user_id]['count']}")
 
-    # Обновляем общий счётчик публикаций
-    if user_id not in user_statistics:
-        user_statistics[user_id] = {"count": 0}
-    user_statistics[user_id]["count"] += 1
-
-    # Сохраняем данные
     save_data()
     print(f"[DEBUG] Данные сохранены для пользователя {user_id}.")
 
@@ -617,23 +651,36 @@ def is_user_paid(user_id, network, city):
         user_id = int(user_id)
 
     print(f"Проверяем оплату для пользователя {user_id}, сеть {network}, город {city}")  # Логирование
-    if user_id in paid_users:
-        print(f"Пользователь {user_id} найден в оплативших: {paid_users[user_id]}")  # Логирование
-        for entry in paid_users[user_id]:
-            if entry["network"] == network and entry["city"] == city:
-                end_date = entry["end_date"]  # Используем ключ 'end_date'
-                print(f"Срок оплаты: {end_date}, тип: {type(end_date)}")  # Логирование
-                if isinstance(end_date, str):  # Если дата в формате строки
+
+    if user_id not in paid_users:
+        print("Пользователь не найден в словаре оплативших.")
+        return False
+
+    for entry in paid_users[user_id]:
+        if entry["network"] == network and entry["city"] == city:
+            end_date = entry["end_date"]
+            print(f"Срок оплаты: {end_date}, тип: {type(end_date)}")  # Логирование
+
+            # Преобразуем дату, если она строка
+            if isinstance(end_date, str):
+                try:
                     end_date = datetime.fromisoformat(end_date)
-                elif isinstance(end_date, datetime):  # Если это уже объект datetime
-                    pass  # Ничего не делаем
-                else:
-                    print(f"Некорректный тип end_date: {type(end_date)}")
+                except ValueError:
+                    print("Ошибка в формате даты.")
                     return False
-                if datetime.now() < end_date:
-                    print("Срок оплаты актуален.")  # Логирование
-                    return True
-    print("Пользователь не оплачен или срок истёк.")  # Логирование
+
+            if not isinstance(end_date, datetime):
+                print(f"Некорректный тип end_date: {type(end_date)}")
+                return False
+
+            # Точная проверка времени (а не просто даты)
+            if datetime.now() < end_date:
+                print("Срок оплаты актуален.")  # Логирование
+                return True
+            else:
+                print("Подписка закончилась.")
+
+    print("Подходящего тарифа не найдено или срок истёк.")
     return False
 
 # Админ-панель
@@ -789,45 +836,33 @@ def show_statistics(message):
 
 def get_admin_statistics():
     statistics = {}
-    for user_id, posts in user_posts.items():
-        published_today = 0
-        links = []
-        details = {}
 
-        for post in posts:
-            if is_today(post["time"]):
-                published_today += 1
-                links.append(f"https://t.me/c/{str(post['chat_id'])[4:]}/{post['message_id']}")
+    for user_id, user_data in user_daily_posts.items():
+        stats = {"published": 0, "remaining": 9, "links": [], "details": {}}
 
-                # Детализация по сетям и городам
-                network = post["network"]
-                city = post["city"]
-                if network not in details:
-                    details[network] = {}
-                if city not in details[network]:
-                    details[network][city] = {"published": 0, "remaining": 3}
-                details[network][city]["published"] += 1
+        for network, cities in user_data.items():
+            stats["details"][network] = {}
+            for city, post_data in cities.items():
+                active_posts = len(post_data["posts"])
+                deleted_posts = len(post_data["deleted_posts"])
+                total_posts = active_posts + deleted_posts
 
-        # Общий лимит для режима "Все сети"
-        if "Все сети" in details:
-            total_published = sum(
-                data["published"]
-                for network in details
-                for city in details[network]
-            )
-            remaining = max(0, 9 - total_published)
-        else:
-            # Лимит для конкретной сети (3 публикации)
-            total_published = published_today
-            remaining = max(0, 3 - total_published)
+                stats["details"][network][city] = {
+                    "published": total_posts,
+                    "remaining": max(0, 3 - total_posts)
+                }
 
-        # Добавляем данные в статистику
-        statistics[user_id] = {
-            "published": published_today,
-            "remaining": remaining,
-            "links": links,
-            "details": details
-        }
+                stats["published"] += total_posts
+
+        stats["remaining"] = max(0, 9 - stats["published"])
+
+        # Ссылки на активные посты (если нужны)
+        if user_id in user_posts:
+            for post in user_posts[user_id]:
+                if is_today(post["time"]):
+                    stats["links"].append(f"https://t.me/c/{str(post['chat_id'])[4:]}/{post['message_id']}")
+
+        statistics[user_id] = stats
 
     print(f"[DEBUG] Статистика для админа: {statistics}")
     return statistics
@@ -996,13 +1031,13 @@ def select_network(message, text, media_type, file_id):
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        safe_send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     city = message.text
     if city == "Выбрать другую сеть":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        safe_send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
@@ -1025,20 +1060,21 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
+            # Подмена названия города в НС
             if network == "НС" and city in ns_city_substitution:
                 city = ns_city_substitution[city]
 
             if city in chat_dict:
                 chat_id = chat_dict[city]
                 if not check_daily_limit(user_id, network, city):
-                    bot.send_message(message.chat.id, f" Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+                    safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
                     continue
 
                 sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
                 if sent_message:
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                    safe_send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             else:
-                bot.send_message(message.chat.id, f" Ошибка! Город '{city}' не найден в сети «{network}».")
+                safe_send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
         ask_for_new_post(message)
     else:
         markup = types.InlineKeyboardMarkup()
@@ -1046,7 +1082,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
         else:
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, " У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
+        safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
@@ -1087,19 +1123,25 @@ def handle_delete_post(message):
         bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
         return
 
-    for post in user_posts[message.chat.id]:
+    for post in list(user_posts[message.chat.id]):  # Копия списка для безопасной итерации
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
-                bot.delete_message(post["chat_id"], post["message_id"])
+                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
+                try:
+                    bot.delete_message(post["chat_id"], post["message_id"])
+                except Exception as e:
+                    if "message to delete not found" in str(e):
+                        print(f"[INFO] Сообщение уже удалено: {e}")
+                    else:
+                        raise
                 user_posts[message.chat.id].remove(post)
                 update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
-                print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
-                bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")
+                bot.send_message(message.chat.id, f"⚠️ Ошибка при удалении объявления: {e}")
                 return
 
     bot.send_message(message.chat.id, " Объявление не найдено.")
@@ -1111,14 +1153,20 @@ def delete_all_posts(message):
         bot.send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
-    for post in user_posts[user_id]:
+    for post in list(user_posts[user_id]):  # Копия списка
         try:
-            print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
-            bot.delete_message(post["chat_id"], post["message_id"])
+            print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
+            try:
+                bot.delete_message(post["chat_id"], post["message_id"])
+            except Exception as e:
+                if "message to delete not found" in str(e):
+                    print(f"[INFO] Сообщение уже удалено: {e}")
+                else:
+                    raise
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
-            print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
-            bot.send_message(user_id, f" Ошибка при удалении объявления: {e}")
+            print(f"[ERROR] Ошибка при удалении объявления: {e}")
+            bot.send_message(user_id, f"⚠️ Ошибка при удалении одного из объявлений: {e}")
 
     user_posts[user_id] = []
     save_data()
@@ -1182,6 +1230,25 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
         return None
+
+@bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
+def handle_stats_button(message):
+    try:
+        stats = get_user_statistics(message.from_user.id)
+        response = (
+            f"📊 Ваша статистика:\n"
+            f"• Опубликовано сегодня: {stats['published']}\n"
+            f"• Осталось публикаций: {stats['remaining']}\n"
+        )
+        if stats["details"]:
+            response += "\n📍 Детали по сетям:\n"
+            for network, cities in stats["details"].items():
+                for city, data in cities.items():
+                    response += f"  └ {network}, {city}: {data['published']} опубликовано, {data['remaining']} осталось\n"
+        bot.send_message(message.chat.id, response)
+    except Exception as e:
+        print(f"[ERROR] Ошибка при показе статистики: {e}")
+        bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
 
 # Добавляем маршрут для проверки работоспособности сервиса (если зайти по корневому URL)
 @app.route('/')
