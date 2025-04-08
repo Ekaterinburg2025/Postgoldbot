@@ -45,9 +45,10 @@ bot = telebot.TeleBot(TOKEN)
 
 def safe_send_message(chat_id, text, **kwargs):
     try:
-        bot.send_message(chat_id, text, **kwargs)
+        return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
         print(f"[Ошибка отправки сообщения] chat_id={chat_id} — {e}")
+        return None
 
 # URL вебхука
 WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
@@ -1171,24 +1172,16 @@ def handle_delete_post(message):
         for post in list(user_posts[user_id]):
             if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
                 try:
-                    #### Проверяем, существует ли сообщение
+                    # Попытка удалить сообщение
                     try:
-                        bot.get_chat(post["chat_id"])
+                        bot.delete_message(post["chat_id"], post["message_id"])
                     except Exception as e:
-                        print(f"[DEBUG] Сообщение уже удалено: {e}")
-                        user_posts[user_id].remove(post)
-                        update_daily_posts(user_id, post["network"], post["city"], remove=True)
-                        save_data()
-                        bot.send_message(user_id, "✅ Объявление уже удалено.")
-                        return
+                        print(f"[DEBUG] Ошибка при удалении сообщения (возможно, уже удалено): {e}")
 
-                    #### Удаляем сообщение
-                    bot.delete_message(post["chat_id"], post["message_id"])
+                    # Удаляем только из user_posts, но лимиты и статистику НЕ трогаем
                     user_posts[user_id].remove(post)
-                    update_daily_posts(user_id, post["network"], post["city"], remove=True)
                     save_data()
 
-                    #### Уведомляем пользователя об успешном удалении
                     bot.send_message(user_id, "✅ Объявление успешно удалено.")
                     return
                 except Exception as e:
@@ -1200,76 +1193,55 @@ def handle_delete_post(message):
         print(f"[ERROR] Ошибка при обработке удаления: {e}")
         bot.send_message(user_id, f"❌ Ошибка при удалении объявления: {e}")
 
-def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
-    try:
-        network = None
-        city = None
+def select_city_and_publish(message, text, selected_network, media_type, file_id):
+    if message.text == "Назад":
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        return
 
-        #### Определяем сеть и город
-        if chat_id in chat_ids_mk.values():
-            network = "Мужской Клуб"
-            for city_name, city_chat_id in chat_ids_mk.items():
-                if city_chat_id == chat_id:
-                    city = city_name
-                    break
-        elif chat_id in chat_ids_parni.values():
-            network = "ПАРНИ 18+"
-            for city_name, city_chat_id in chat_ids_parni.items():
-                if city_chat_id == chat_id:
-                    city = city_name
-                    break
-        elif chat_id in chat_ids_ns.values():
-            network = "НС"
-            for city_name, city_chat_id in chat_ids_ns.items():
-                if city_chat_id == chat_id:
-                    city = city_name
-                    break
+    city = message.text
+    if city == "Выбрать другую сеть":
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        return
 
-        #### Проверяем лимит
-        if not check_daily_limit(user_id, network, city):
-            bot.send_message(user_id, f"Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
-            return None
+    user_id = message.from_user.id
+    user_name = get_user_name(message.from_user)
 
-        #### Формируем текст объявления
-        signature = network_signatures.get(network, "")
-        full_text = f"Объявление от {user_name}:\n\n{text}\n\n{signature}"
+    if selected_network == "Все сети":
+        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
+    else:
+        networks = [selected_network]
 
-        #### Создаём кнопку "Написать"
-        markup = types.InlineKeyboardMarkup()
-        if not user_name.startswith("@"):
-            markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
-
-        #### Публикуем объявление
-        if media_type == "photo":
-            sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
-        elif media_type == "video":
-            sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
+    for network in networks:
+        if network == "Мужской Клуб":
+            chat_dict = chat_ids_mk
+        elif network == "ПАРНИ 18+":
+            chat_dict = chat_ids_parni
+        elif network == "НС":
+            chat_dict = chat_ids_ns
         else:
-            sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
+            continue
 
-        #### Сохраняем информацию о публикации
-        if user_id not in user_posts:
-            user_posts[user_id] = []
-        user_posts[user_id].append({
-            "message_id": sent_message.message_id,
-            "chat_id": chat_id,
-            "time": datetime.now(),
-            "city": city,
-            "network": network
-        })
+        target_city = ns_city_substitution[city] if (network == "НС" and city in ns_city_substitution) else city
 
-        #### Обновляем статистику
-        update_daily_posts(user_id, network, city)
-        save_data()
+        if target_city in chat_dict:
+            chat_id = chat_dict[target_city]
 
-        #### Уведомляем пользователя об успешной публикации
-        bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-        return sent_message
-    except Exception as e:
-        print(f"[ERROR] Ошибка при публикации объявления: {e}")
-        bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
-        return None
+            # Проверяем право на публикацию
+            if is_user_paid(user_id, network, city):
+                publish_post(chat_id, text, user_name, user_id, media_type, file_id)
+            else:
+                markup = types.InlineKeyboardMarkup()
+                if selected_network == "Мужской Клуб":
+                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
+                else:
+                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+                safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
+        else:
+            safe_send_message(message.chat.id, f"❌ Ошибка! Город '{target_city}' не найден в сети «{network}».")
 
+    ask_for_new_post(message)
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
