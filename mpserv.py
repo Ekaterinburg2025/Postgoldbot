@@ -1082,45 +1082,53 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             networks = [selected_network]
 
         for network in networks:
-            if network == "Мужской Клуб":
-                chat_dict = chat_ids_mk
-            elif network == "ПАРНИ 18+":
-                chat_dict = chat_ids_parni
-            elif network == "НС":
-                chat_dict = chat_ids_ns
-            else:
-                continue
-
-            if network == "НС" and city in ns_city_substitution:
-                city = ns_city_substitution[city]
-
-            if city in chat_dict:
-                chat_id = chat_dict[city]
-                if not check_daily_limit(user_id, network, city):
-                    safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+            try:
+                if network == "Мужской Клуб":
+                    chat_dict = chat_ids_mk
+                elif network == "ПАРНИ 18+":
+                    chat_dict = chat_ids_parni
+                elif network == "НС":
+                    chat_dict = chat_ids_ns
+                else:
                     continue
 
-                sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
-                if sent_message:
-                    if message.chat.id not in user_posts:
-                        user_posts[message.chat.id] = []
-                    user_posts[message.chat.id].append({
-                        "message_id": sent_message.message_id,
-                        "chat_id": chat_id,
-                        "time": datetime.now(),
-                        "city": city,
-                        "network": network
-                    })
-                    update_daily_posts(user_id, network, city)
-                    if user_id not in user_statistics:
-                        user_statistics[user_id] = {"count": 0}
-                    user_statistics[user_id]["count"] += 1
-                    save_data()
+                actual_city = city
+                if network == "НС" and city in ns_city_substitution:
+                    actual_city = ns_city_substitution[city]
 
-                    # Отбивка
-                    safe_send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-            else:
-                safe_send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
+                if actual_city in chat_dict:
+                    chat_id = chat_dict[actual_city]
+                    if not check_daily_limit(user_id, network, city):
+                        safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+                        continue
+
+                    sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
+                    if sent_message:
+                        if message.chat.id not in user_posts:
+                            user_posts[message.chat.id] = []
+                        user_posts[message.chat.id].append({
+                            "message_id": sent_message.message_id,
+                            "chat_id": chat_id,
+                            "time": datetime.now(),
+                            "city": city,
+                            "network": network
+                        })
+                        update_daily_posts(user_id, network, city)
+                        if user_id not in user_statistics:
+                            user_statistics[user_id] = {"count": 0}
+                        user_statistics[user_id]["count"] += 1
+                        save_data()
+
+                        # Отбивка
+                        safe_send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                    else:
+                        safe_send_message(message.chat.id, f"❌ Не удалось опубликовать объявление в «{network}», {city}.")
+                else:
+                    safe_send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
+            except Exception as e:
+                print(f"[ERROR] Ошибка при публикации в сети {network}, город {city}: {e}")
+                safe_send_message(message.chat.id, f"⚠️ Ошибка при публикации в «{network}», {city}: {e}")
+
         ask_for_new_post(message)
     else:
         markup = types.InlineKeyboardMarkup()
