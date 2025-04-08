@@ -60,7 +60,7 @@ user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
 admins = [ADMIN_CHAT_ID]
-db_lock = Lock()
+db_lock = threading.Lock()
 
 # Инициализация базы данных
 def init_db():
