@@ -218,19 +218,6 @@ def add_paid_user(user_id, network, city, end_date):
     # Преобразуем время в UTC
     end_date_utc = end_date.astimezone(pytz.UTC)
 
-def check_user_subscription(user_id):
-    if user_id not in paid_users:
-        return False
-    
-    now = datetime.now()
-    for entry in paid_users[user_id]:
-        end_date = entry["end_date"]
-        if isinstance(end_date, str):
-            end_date = datetime.fromisoformat(end_date)
-        if now < end_date:
-            return True
-    return False
-
     # Добавляем пользователя в список оплативших
     if user_id not in paid_users:
         paid_users[user_id] = []
@@ -571,8 +558,8 @@ def update_daily_posts(user_id, network, city, remove=False):
 
     if city not in user_daily_posts[user_id][network]:
         user_daily_posts[user_id][network][city] = {
-            "posts": [],
-            "deleted_posts": [],
+            "posts": [],  # Активные публикации
+            "deleted_posts": [],  # Удалённые публикации
             "last_post_time": None
         }
 
@@ -585,7 +572,7 @@ def update_daily_posts(user_id, network, city, remove=False):
     else:
         # Добавляем временную метку публикации
         post_time = get_current_time()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
             user_daily_posts[user_id][network][city]["posts"].append(post_time)
             user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
             print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
@@ -1103,14 +1090,7 @@ def handle_delete_post(message):
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                # Проверяем существует ли сообщение
-                try:
-                    bot.get_chat_member(post["chat_id"], bot.get_me().id)
-                except telebot.apihelper.ApiException as e:
-                    if "chat not found" in str(e) or "message not found" in str(e):
-                        bot.send_message(message.chat.id, "Сообщение уже удалено.")
-                        continue
-                
+                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
                 update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
@@ -1118,7 +1098,7 @@ def handle_delete_post(message):
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
-                print(f"[ERROR] Ошибка при удалении объявления: {e}")
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
 
@@ -1146,7 +1126,6 @@ def delete_all_posts(message):
 
 def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
     try:
-        # Определяем сеть и город по chat_id
         network = None
         city = None
 
@@ -1169,48 +1148,23 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
                     city = city_name
                     break
 
-        # Проверяем лимит публикаций
         if not check_daily_limit(user_id, network, city):
             bot.send_message(user_id, f" Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
             return None
 
-        # Формируем текст с подписью
         signature = network_signatures.get(network, "")
         full_text = f" Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # Добавляем кнопку "Написать", если username отсутствует
         markup = types.InlineKeyboardMarkup()
         if not user_name.startswith("@"):
             markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
 
-        # Публикуем объявление
         if media_type == "photo":
             sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
         elif media_type == "video":
             sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
-
-        # Сохраняем данные о сообщении
-        if user_id not in user_posts:
-            user_posts[user_id] = []
-        user_posts[user_id].append({
-            "message_id": sent_message.message_id,
-            "chat_id": chat_id,
-            "time": datetime.now(),
-            "city": city,
-            "network": network
-        })
-        save_data()
-        print(f"[DEBUG] Сообщение сохранено: user_id={user_id}, chat_id={chat_id}, message_id={sent_message.message_id}")
-
-        # Возвращаем отправленное сообщение
-        return sent_message
-
-    except Exception as e:
-        print(f"Ошибка при публикации объявления: {e}")
-        bot.send_message(user_id, f"Ошибка при публикации объявления: {e}")
-        return None
 
         # Сохраняем данные о сообщении
         if user_id not in user_posts:
