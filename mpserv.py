@@ -1,9 +1,5 @@
+# Импорты
 import os
-
-import os
-import requests
-import threading
-import time
 import json
 import sqlite3
 import logging
@@ -12,8 +8,10 @@ import pytz
 import telebot
 from telebot import types
 from flask import Flask, request, abort
+import threading
 
-# логос
+
+# Создаём Flask-приложение
 app = Flask(__name__)
 
 # Настройка логирования
@@ -27,6 +25,9 @@ logging.basicConfig(
 TOKEN = os.getenv("BOT_TOKEN")  # Используем переменную окружения для токена
 bot = telebot.TeleBot(TOKEN)
 
+# URL вебхука
+WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
+
 # Админ ID (ваш ID)
 ADMIN_CHAT_ID = 479938867  # Замените на ваш ID
 
@@ -36,6 +37,83 @@ user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
 admins = [ADMIN_CHAT_ID]
+
+# Инициализация базы данных
+def init_db():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS paid_users (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            end_date TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_users (
+            user_id INTEGER PRIMARY KEY
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_posts (
+            user_id INTEGER,
+            network TEXT,
+            city TEXT,
+            time TEXT,
+            chat_id INTEGER,
+            message_id INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+# Загрузка данных при старте
+def load_data():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    # Загружаем оплативших пользователей
+    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+    paid_users = {}
+    for user_id, network, city, end_date in cur.fetchall():
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": datetime.fromisoformat(end_date)
+        })
+
+    # Загружаем админов
+    cur.execute("SELECT user_id FROM admin_users")
+    admin_users = [row[0] for row in cur.fetchall()]
+
+    # Загружаем публикации
+    cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+    user_posts = {}
+    for user_id, network, city, time, chat_id, message_id in cur.fetchall():
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "network": network,
+            "city": city,
+            "time": time,
+            "chat_id": chat_id,
+            "message_id": message_id
+        })
+
+    conn.close()
+    return paid_users, admin_users, user_posts
+
+# Инициализация базы данных
+init_db()
+
+# Добавляем блокировку для синхронизации доступа к базе данных
+db_lock = threading.Lock()
+
+# Загрузка данных при старте
+paid_users, admin_users, user_posts = load_data()
 
 # Списки chat_id для каждой сети и города
 chat_ids_mk = {
@@ -109,94 +187,106 @@ user_daily_posts = {}
 
 # Статичные подписи для каждой сети
 network_signatures = {
-    "Мужской Клуб": "️ 🕸️Реклама. С согласованием администрации сети МК.🕸️",
+    "Мужской Клуб": "️ 🕸️Реклама. Согласовано с администрацей сети МК.",
     "ПАРНИ 18+": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫",
     "НС": "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫"
 }
 
-# Словарь для хранения статистики публикаций
-user_statistics = {}
+# Вызов при старте бота
+init_db()
 
-# Список администраторов бота
-admins = [ADMIN_CHAT_ID]
-
-# Загрузка данных при запуске
-def load_data():
+def load_paid_users():
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
-    cur.execute("SELECT data FROM bot_data WHERE id = 1")
-    result = cur.fetchone()
-    if result:
-        data = json.loads(result[0])
-        global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = data.get("paid_users", {})
-        user_posts = data.get("user_posts", {})
-        user_daily_posts = data.get("user_daily_posts", {})
-        user_statistics = data.get("user_statistics", {})
-        admins = data.get("admins", [ADMIN_CHAT_ID])
-    cur.close()
+
+    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+    paid_users = {}
+
+    for user_id, network, city, end_date in cur.fetchall():
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+        paid_users[user_id].append({
+            "network": network,
+            "city": city,
+            "end_date": datetime.fromisoformat(end_date)
+        })
+
     conn.close()
+    return paid_users
 
-# Сохранение данных
-def save_data():
+def add_paid_user(user_id, network, city, end_date):
+    # Преобразуем время в UTC
+    end_date_utc = end_date.astimezone(pytz.UTC)
+
+    # Добавляем пользователя в список оплативших
+    if user_id not in paid_users:
+        paid_users[user_id] = []
+    paid_users[user_id].append({
+        "network": network,
+        "city": city,
+        "end_date": end_date_utc.isoformat()
+    })
+
+    save_data()
+
+    # Уведомление админу
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(user_id, f"✅ Вы добавлены в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
+
+def add_admin_user(user_id):
+    # Добавляем пользователя в список администраторов
+    if user_id not in admin_users:
+        admin_users.append(user_id)
+        save_data()
+        bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+        bot.send_message(user_id, "✅ Вы добавлены как администратор.")
+
+def remove_paid_user(user_id):
     conn = sqlite3.connect("bot_data.db")
     cur = conn.cursor()
-    data = {
-        "paid_users": paid_users,
-        "user_posts": user_posts,
-        "user_daily_posts": user_daily_posts,
-        "user_statistics": user_statistics,
-        "admins": admins
-    }
-    cur.execute("INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)", (json.dumps(data),))
+
+    cur.execute("DELETE FROM paid_users WHERE user_id = ?", (user_id,))
     conn.commit()
-    cur.close()
     conn.close()
+
+def load_admin_users():
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("SELECT user_id FROM admin_users")
+    admin_users = [row[0] for row in cur.fetchall()]
+
+    conn.close()
+    return admin_users
+
+def add_admin_user(user_id):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+def remove_admin_user(user_id):
+    conn = sqlite3.connect("bot_data.db")
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM admin_users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def is_admin(user_id):
+    return user_id in admin_users
+
+# Установите ваш часовой пояс
+your_timezone = pytz.timezone("Europe/Moscow")
+
+# Пример использования
+now = datetime.now(your_timezone)
+print(now)
 
 # Загружаем данные при запуске
 load_data()
-
-# Вебхук endpoint
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        abort(403)
-
-# Установка вебхука
-def set_webhook():
-    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
-    try:
-        bot.remove_webhook()
-        result = bot.set_webhook(url=webhook_url)
-        logging.info(f"Вебхук установлен на {webhook_url}: {result}")
-    except telebot.apihelper.ApiTelegramException as e:
-        if "Too Many Requests" in str(e):
-            # Извлекаем время ожидания, если оно указано (например, "retry after 1")
-            retry_after = 1  # Можно парсить строку ошибки, если требуется точное время
-            logging.warning(f"Получена ошибка 429, ждем {retry_after} секунду(ы) перед повторной попыткой")
-            time.sleep(retry_after)
-            try:
-                result = bot.set_webhook(url=webhook_url)
-                logging.info(f"Вебхук успешно установлен после ожидания: {result}")
-            except Exception as e2:
-                logging.error(f"Ошибка установки вебхука после повторной попытки: {e2}")
-                raise e2
-        else:
-            logging.error(f"Ошибка установки вебхука: {e}")
-            raise e
-
-if __name__ == '__main__':
-    set_webhook()  # Устанавливаем вебхук перед запуском
-    app.run(host='0.0.0.0', port=8080)
-
-# Устанавливаем вебхук при запуске
-set_webhook()
 
 # Функция для выбора срока оплаты
 def select_duration_for_payment(message, user_id, network, city):
@@ -229,16 +319,18 @@ def select_duration_for_payment(message, user_id, network, city):
     expiry_date = datetime.now() + timedelta(days=days)
 
     if user_id not in paid_users:
-        paid_users[user_id] = []  # Инициализируем список, если он отсутствует
+        paid_users[user_id] = []
 
-    # Добавляем данные с ключом 'end_date'
     paid_users[user_id].append({
-        "end_date": expiry_date.isoformat(),  # Используем isoformat для сериализации
+        "end_date": expiry_date.isoformat(),
         "network": network,
         "city": city
     })
-    save_data()  # Сохраняем данные
-    bot.send_message(message.chat.id, f" ✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    save_data()
+
+    # Уведомление админу
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
+    bot.send_message(message.chat.id, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
 
 def serialize_datetime(obj):
     if isinstance(obj, datetime):
@@ -266,44 +358,33 @@ def is_new_day(last_post_time):
 
 def get_user_statistics(user_id):
     """Возвращает статистику публикаций для пользователя."""
-    stats = {
-        "published": 0,
-        "remaining": 3,
-        "details": {}
-    }
+    stats = {"published": 0, "remaining": 9, "details": {}}
 
     if user_id in user_daily_posts:
         for network in user_daily_posts[user_id]:
             stats["details"][network] = {}
             for city in user_daily_posts[user_id][network]:
-                posts_today = len([
-                    post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
-                    if is_today(post_time)
-                ])
+                # Считаем активные и удалённые публикации
+                active_posts = len(user_daily_posts[user_id][network][city]["posts"])
+                deleted_posts = len(user_daily_posts[user_id][network][city]["deleted_posts"])
+                total_posts = active_posts + deleted_posts
+
                 stats["details"][network][city] = {
-                    "published": posts_today,
-                    "remaining": max(0, 3 - posts_today)
+                    "published": total_posts,  # Все публикации (активные + удалённые)
+                    "remaining": max(0, 3 - total_posts)  # Оставшиеся публикации
                 }
-                stats["published"] += posts_today
+                stats["published"] += total_posts
 
         # Общий лимит для режима "Все сети"
-        if "Все сети" in stats["details"]:
-            total_published = sum(
-                details["published"]
-                for network in stats["details"]
-                for city in stats["details"][network]
-            )
-            stats["remaining"] = max(0, 9 - total_published)
-        else:
-            stats["remaining"] = max(0, 3 - stats["published"])
+        stats["remaining"] = max(0, 9 - stats["published"])
 
+    print(f"[DEBUG] Статистика для пользователя {user_id}: {stats}")
     return stats
 
 def is_today(timestamp):
-    """Проверяет, что временная метка относится к текущему дню."""
-    if isinstance(timestamp, str):
-        timestamp = datetime.fromisoformat(timestamp)
-    return timestamp.date() == datetime.now().date()
+    """Проверяет, относится ли временная метка к сегодняшнему дню."""
+    now = datetime.now()
+    return datetime.fromisoformat(timestamp).date() == now.date()
 
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
@@ -336,61 +417,39 @@ def validate_text_length(text):
 
 # Сохранение данных в файл
 def save_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    # Преобразуем datetime в строки
-    data = {
-        "paid_users": {
-            user_id: [
-                {
-                    "end_date": entry["end_date"],  # Убедитесь, что 'end_date' существует
-                    "network": entry["network"],    # Ключ 'network'
-                    "city": entry["city"]           # Ключ 'city'
-                }
-                for entry in entries
-            ]
-            for user_id, entries in paid_users.items()
-        },
-        "user_posts": user_posts,
-        "user_daily_posts": user_daily_posts,
-        "user_statistics": user_statistics,
-        "admins": admins
-    }
-    cur.execute(
-        "INSERT OR REPLACE INTO bot_data (id, data) VALUES (1, ?)",
-        (json.dumps(data, default=str),)  # Используем default=str для сериализации datetime
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    """Сохраняет данные в базу данных."""
+    with db_lock:  # Используем блокировку
+        conn = sqlite3.connect("bot_data.db")
+        cur = conn.cursor()
 
-def load_data():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS bot_data (id INTEGER PRIMARY KEY, data TEXT)")
-    cur.execute("SELECT data FROM bot_data WHERE id = 1")
-    result = cur.fetchone()
-    if result:
-        data = json.loads(result[0])
-        global paid_users, user_posts, user_daily_posts, user_statistics, admins
-        paid_users = {
-            user_id: [
-                {
-                    "end_date": datetime.fromisoformat(entry["end_date"]) if isinstance(entry["end_date"], str) else entry["end_date"],
-                    "network": entry["network"],
-                    "city": entry["city"]
-                }
-                for entry in entries
-            ]
-            for user_id, entries in data.get("paid_users", {}).items()
-        }
-        user_posts = data.get("user_posts", {})
-        user_daily_posts = data.get("user_daily_posts", {})
-        user_statistics = data.get("user_statistics", {})
-        admins = data.get("admins", [ADMIN_CHAT_ID])
-        print("Данные загружены:", data)  # Логирование
-    cur.close()
-    conn.close()
+        # Очищаем таблицы
+        cur.execute("DELETE FROM paid_users")
+        cur.execute("DELETE FROM admin_users")
+        cur.execute("DELETE FROM user_posts")
+
+        # Сохраняем оплативших пользователей
+        for user_id, entries in paid_users.items():
+            for entry in entries:
+                cur.execute("""
+                    INSERT INTO paid_users (user_id, network, city, end_date)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+
+        # Сохраняем админов
+        for user_id in admin_users:
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+
+        # Сохраняем публикации
+        for user_id, posts in user_posts.items():
+            for post in posts:
+                cur.execute("""
+                    INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
+
+        conn.commit()
+        conn.close()
+        print("[DEBUG] Данные сохранены.")
 
 # Клавиатура выбора сети
 def get_network_markup():
@@ -458,27 +517,39 @@ def check_daily_limit(user_id, network, city):
         user_daily_posts[user_id][network] = {}
 
     if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
+        user_daily_posts[user_id][network][city] = {
+            "posts": [],
+            "deleted_posts": [],
+            "last_post_time": None
+        }
 
     # Проверяем, наступил ли новый день
     if is_new_day(user_daily_posts[user_id][network][city]["last_post_time"]):
-        user_daily_posts[user_id][network][city]["posts"] = []
+        user_daily_posts[user_id][network][city]["posts"] = []  # Сбрасываем активные публикации
+        user_daily_posts[user_id][network][city]["deleted_posts"] = []  # Сбрасываем удалённые публикации
         print(f"[DEBUG] Новый день для пользователя {user_id} в сети {network}, городе {city}.")
 
-    # Проверяем лимит публикаций
+    # Считаем активные и удалённые публикации
+    active_posts = len([
+        post_time for post_time in user_daily_posts[user_id][network][city]["posts"]
+        if is_today(post_time)
+    ])
+    deleted_posts = len([
+        post_time for post_time in user_daily_posts[user_id][network][city]["deleted_posts"]
+        if is_today(post_time)
+    ])
+    total_posts = active_posts + deleted_posts
+
+    # Проверяем лимит
     if network == "Все сети":
         # Общий лимит для всех сетей (9 публикаций)
-        total_posts = 0
-        for net in ["Мужской Клуб", "ПАРНИ 18+", "НС"]:
-            if net in user_daily_posts[user_id] and city in user_daily_posts[user_id][net]:
-                total_posts += len(user_daily_posts[user_id][net][city]["posts"])
         return total_posts < 9
     else:
         # Лимит для конкретной сети (3 публикации)
-        return len(user_daily_posts[user_id][network][city]["posts"]) < 3
+        return total_posts < 3
+
 
 def update_daily_posts(user_id, network, city, remove=False):
-    """Обновляет данные о публикациях пользователя."""
     if user_id not in user_daily_posts:
         user_daily_posts[user_id] = {}
 
@@ -486,23 +557,28 @@ def update_daily_posts(user_id, network, city, remove=False):
         user_daily_posts[user_id][network] = {}
 
     if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {"posts": [], "last_post_time": None}
+        user_daily_posts[user_id][network][city] = {
+            "posts": [],  # Активные публикации
+            "deleted_posts": [],  # Удалённые публикации
+            "last_post_time": None
+        }
 
     if remove:
-        # Удаляем последнюю публикацию
+        # Перемещаем последнюю публикацию в список удалённых
         if user_daily_posts[user_id][network][city]["posts"]:
-            user_daily_posts[user_id][network][city]["posts"].pop()
+            deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
+            user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
+            print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
     else:
         # Добавляем временную метку публикации
-        post_time = datetime.now()
-        user_daily_posts[user_id][network][city]["posts"].append(post_time.isoformat())
-        user_daily_posts[user_id][network][city]["last_post_time"] = post_time
+        post_time = get_current_time()
+        if post_time not in user_daily_posts[user_id][network][city]["posts"]:  # Предотвращаем дублирование
+            user_daily_posts[user_id][network][city]["posts"].append(post_time)
+            user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
+            print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
 
-    # Логирование
-    print(f"[DEBUG] Обновление данных о публикациях для пользователя {user_id} в сети {network}, городе {city}.")
-
-    # Сохраняем данные
     save_data()
+    print(f"[DEBUG] Данные сохранены для пользователя {user_id}.")
 
     # Обновляем общий счётчик публикаций
     if user_id not in user_statistics:
@@ -643,48 +719,6 @@ def select_city_for_payment(message, user_id, network):
     bot.send_message(message.chat.id, " Выберите срок оплаты:", reply_markup=markup)
     bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
 
-# Функция для выбора срока оплаты
-def select_duration_for_payment(message, user_id, network, city):
-    if message.text == "Назад":
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        if network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif network == "НС":
-            cities = list(chat_ids_ns.keys())
-        markup.add(*cities)
-        markup.add("Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
-        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
-        return
-
-    duration = message.text
-    if duration == "День":
-        days = 1
-    elif duration == "Неделя":
-        days = 7
-    elif duration == "Месяц":
-        days = 30
-    else:
-        bot.send_message(message.chat.id, " Ошибка! Выберите правильный срок.")
-        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
-        return
-
-    expiry_date = datetime.now() + timedelta(days=days)
-
-    if user_id not in paid_users:
-        paid_users[user_id] = []  # Инициализируем список, если он отсутствует
-
-    # Добавляем данные с ключом 'end_date'
-    paid_users[user_id].append({
-        "end_date": expiry_date.isoformat(),  # Используем isoformat для сериализации
-        "network": network,
-        "city": city
-    })
-    save_data()  # Сохраняем данные
-    bot.send_message(message.chat.id, f" ✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {days} дней. Срок действия: {expiry_date.strftime('%Y-%m-%d')}.")
-
 # Функция для добавления администратора
 def add_admin_step(message):
     try:
@@ -756,7 +790,6 @@ def show_statistics(message):
 def get_admin_statistics():
     statistics = {}
     for user_id, posts in user_posts.items():
-        # Получаем количество публикаций за сегодня
         published_today = 0
         links = []
         details = {}
@@ -784,7 +817,9 @@ def get_admin_statistics():
             )
             remaining = max(0, 9 - total_published)
         else:
-            remaining = max(0, 3 - published_today)
+            # Лимит для конкретной сети (3 публикации)
+            total_published = published_today
+            remaining = max(0, 3 - total_published)
 
         # Добавляем данные в статистику
         statistics[user_id] = {
@@ -793,6 +828,8 @@ def get_admin_statistics():
             "links": links,
             "details": details
         }
+
+    print(f"[DEBUG] Статистика для админа: {statistics}")
     return statistics
 
 @bot.message_handler(commands=['statistics'])
@@ -999,21 +1036,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
                 if sent_message:
-                    if message.chat.id not in user_posts:
-                        user_posts[message.chat.id] = []
-                    user_posts[message.chat.id].append({
-                        "message_id": sent_message.message_id,
-                        "chat_id": chat_id,
-                        "time": datetime.now(),
-                        "city": city,
-                        "network": network
-                    })
-                    update_daily_posts(user_id, network, city)
-                    if user_id not in user_statistics:
-                        user_statistics[user_id] = {"count": 0}
-                    user_statistics[user_id]["count"] += 1
-                    save_data()
-                    bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             else:
                 bot.send_message(message.chat.id, f" Ошибка! Город '{city}' не найден в сети «{network}».")
         ask_for_new_post(message)
@@ -1067,15 +1090,18 @@ def handle_delete_post(message):
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
+                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
                 bot.delete_message(post["chat_id"], post["message_id"])
                 user_posts[message.chat.id].remove(post)
-                update_daily_posts(message.chat.id, post["network"], post["city"])
+                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
+                print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
                 bot.send_message(message.chat.id, f" Ошибка при удалении объявления: {e}")
                 return
+
     bot.send_message(message.chat.id, " Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
@@ -1087,8 +1113,11 @@ def delete_all_posts(message):
 
     for post in user_posts[user_id]:
         try:
+            print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
             bot.delete_message(post["chat_id"], post["message_id"])
+            update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
+            print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
             bot.send_message(user_id, f" Ошибка при удалении объявления: {e}")
 
     user_posts[user_id] = []
@@ -1137,9 +1166,18 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        update_daily_posts(user_id, network, city)
+        # Сохраняем данные о сообщении
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "message_id": sent_message.message_id,
+            "chat_id": chat_id,
+            "time": datetime.now(),
+            "city": city,
+            "network": network
+        })
         save_data()
-
+        print(f"[DEBUG] Сообщение сохранено: user_id={user_id}, chat_id={chat_id}, message_id={sent_message.message_id}")  # Логирование
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
@@ -1153,9 +1191,7 @@ def index():
 # Эндпоинт для вебхука, куда будут приходить обновления от Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Логируем факт получения запроса (полезно для отладки)
     app.logger.info("Получен запрос на вебхук")
-    
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         app.logger.info(f"Получено обновление: {json_string}")
@@ -1165,14 +1201,16 @@ def webhook():
     else:
         abort(403)
 
-# Функция для установки вебхука
+# Определение функции set_webhook
 def set_webhook():
-    webhook_url = "https://postgoldbot.onrender.com/webhook"  # Замените на актуальный URL вашего сервера
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    app.logger.info(f"Вебхук установлен на {webhook_url}")
+    try:
+        bot.remove_webhook()
+        result = bot.set_webhook(url=WEBHOOK_URL)
+        app.logger.info(f"Вебхук установлен на {WEBHOOK_URL}: {result}")
+    except Exception as e:
+        app.logger.error(f"Ошибка при установке вебхука: {e}")
 
-# Точка входа в программу
+# Запуск Flask
 if __name__ == '__main__':
     set_webhook()  # Устанавливаем вебхук перед запуском
     app.run(host='0.0.0.0', port=8080)
