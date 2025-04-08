@@ -402,8 +402,8 @@ def is_new_day(last_post_time):
     if isinstance(last_post_time, str):
         last_post_time = datetime.fromisoformat(last_post_time)
 
-current_time = datetime.now(ekaterinburg_tz)
-print(current_time)
+    current_time = datetime.now(ekaterinburg_tz)
+    print(current_time)
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
