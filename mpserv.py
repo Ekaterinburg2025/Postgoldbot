@@ -1062,74 +1062,82 @@ def select_network(message, text, media_type, file_id):
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
-        safe_send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     city = message.text
     if city == "Выбрать другую сеть":
-        safe_send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
-    if is_user_paid(message.from_user.id, selected_network, city):
-        user_name = get_user_name(message.from_user)
-        user_id = message.from_user.id
+    user_id = message.from_user.id
+    user_name = get_user_name(message.from_user)
 
-        if selected_network == "Все сети":
-            networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
+    if selected_network == "Все сети":
+        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
+    else:
+        networks = [selected_network]
+
+    for network in networks:
+        if network == "Мужской Клуб":
+            chat_dict = chat_ids_mk
+        elif network == "ПАРНИ 18+":
+            chat_dict = chat_ids_parni
+        elif network == "НС":
+            chat_dict = chat_ids_ns
         else:
-            networks = [selected_network]
+            continue
 
-        for network in networks:
-            try:
-                if network == "Мужской Клуб":
-                    chat_dict = chat_ids_mk
-                elif network == "ПАРНИ 18+":
-                    chat_dict = chat_ids_parni
-                elif network == "НС":
-                    chat_dict = chat_ids_ns
+        target_city = ns_city_substitution[city] if (network == "НС" and city in ns_city_substitution) else city
+
+        if target_city in chat_dict:
+            chat_id = chat_dict[target_city]
+
+            if not is_user_paid(user_id, network, city):
+                markup = types.InlineKeyboardMarkup()
+                if selected_network == "Мужской Клуб":
+                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
                 else:
-                    continue
+                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+                safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
+                continue
 
-                actual_city = city
-                if network == "НС" and city in ns_city_substitution:
-                    actual_city = ns_city_substitution[city]
+            if not check_daily_limit(user_id, network, city):
+                safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+                continue
 
-                if actual_city in chat_dict:
-                    chat_id = chat_dict[actual_city]
-                    if not check_daily_limit(user_id, network, city):
-                        safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
-                        continue
+            sent_message = send_post(chat_id, text, user_name, user_id, media_type, file_id)
 
-                    sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
-                    if sent_message:
-                        if message.chat.id not in user_posts:
-                            user_posts[message.chat.id] = []
-                        user_posts[message.chat.id].append({
-                            "message_id": sent_message.message_id,
-                            "chat_id": chat_id,
-                            "time": datetime.now(),
-                            "city": city,
-                            "network": network
-                        })
-                        update_daily_posts(user_id, network, city)
-                        if user_id not in user_statistics:
-                            user_statistics[user_id] = {"count": 0}
-                        user_statistics[user_id]["count"] += 1
-                        save_data()
+            if sent_message:
+                # Сохраняем информацию о посте
+                if message.chat.id not in user_posts:
+                    user_posts[message.chat.id] = []
+                user_posts[message.chat.id].append({
+                    "message_id": sent_message.message_id,
+                    "chat_id": chat_id,
+                    "time": datetime.now(),
+                    "city": city,
+                    "network": network
+                })
 
-                        # Отбивка
-                        safe_send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-                    else:
-                        safe_send_message(message.chat.id, f"❌ Не удалось опубликовать объявление в «{network}», {city}.")
-                else:
-                    safe_send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
-            except Exception as e:
-                print(f"[ERROR] Ошибка при публикации в сети {network}, город {city}: {e}")
-                safe_send_message(message.chat.id, f"⚠️ Ошибка при публикации в «{network}», {city}: {e}")
+                update_daily_posts(user_id, network, city)
 
-        ask_for_new_post(message)
+                if user_id not in user_statistics:
+                    user_statistics[user_id] = {"count": 0}
+                user_statistics[user_id]["count"] += 1
+
+                save_data()
+
+                safe_send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+            else:
+                safe_send_message(message.chat.id, f"❌ Не удалось отправить сообщение в «{network}», город {city}.")
+        else:
+            safe_send_message(message.chat.id, f"❌ Ошибка! Город '{target_city}' не найден в сети «{network}».")
+
+    ask_for_new_post(message)
+
     else:
         markup = types.InlineKeyboardMarkup()
         if selected_network == "Мужской Клуб":
