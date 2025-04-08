@@ -65,8 +65,8 @@ db_lock = threading.Lock()
 
 # Инициализация базы данных
 def init_db():
-    conn = sqlite3.connect("bot_data.db")
-    cur = conn.cursor()
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:    cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS paid_users (
             user_id INTEGER,
@@ -95,7 +95,8 @@ def init_db():
 
 # Загрузка данных при старте
 def load_data():
-    conn = sqlite3.connect("bot_data.db")
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     # Загружаем оплативших пользователей
@@ -221,7 +222,8 @@ network_signatures = {
 init_db()
 
 def load_paid_users():
-    conn = sqlite3.connect("bot_data.db")
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
@@ -262,8 +264,9 @@ def add_admin_user(user_id):
     bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
     bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
-def remove_paid_user(user_id):
-    conn = sqlite3.connect("bot_data.db")
+def remove_paid_user(user_id, network, city):
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     cur.execute("DELETE FROM paid_users WHERE user_id = ?", (user_id,))
@@ -271,7 +274,8 @@ def remove_paid_user(user_id):
     conn.close()
 
 def load_admin_users():
-    conn = sqlite3.connect("bot_data.db")
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     cur.execute("SELECT user_id FROM admin_users")
@@ -281,7 +285,8 @@ def load_admin_users():
     return admin_users
 
 def add_admin_user(user_id):
-    conn = sqlite3.connect("bot_data.db")
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
@@ -289,7 +294,8 @@ def add_admin_user(user_id):
     conn.close()
 
 def remove_admin_user(user_id):
-    conn = sqlite3.connect("bot_data.db")
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
     cur = conn.cursor()
 
     cur.execute("DELETE FROM admin_users WHERE user_id = ?", (user_id,))
@@ -470,42 +476,57 @@ def validate_text_length(text):
     return len(text) <= 1000
 
 # Сохранение данных в файл
-def save_data():
-    """Сохраняет данные в базу данных."""
-    with db_lock:  # Используем блокировку
-        try:
-            with sqlite3.connect("bot_data.db") as conn:  # Используем контекстный менеджер
-                cur = conn.cursor()
+def save_data(retries=3, delay=0.5):
+    """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
+    for attempt in range(retries):
+        with db_lock:  # Гарантируем одиночный доступ
+            try:
+                with sqlite3.connect("bot_data.db", timeout=5) as conn:  # timeout поможет тоже
+                    cur = conn.cursor()
 
-                # Очищаем таблицы
-                cur.execute("DELETE FROM paid_users")
-                cur.execute("DELETE FROM admin_users")
-                cur.execute("DELETE FROM user_posts")
+                    # Очищаем таблицы
+                    cur.execute("DELETE FROM paid_users")
+                    cur.execute("DELETE FROM admin_users")
+                    cur.execute("DELETE FROM user_posts")
 
-                # Сохраняем оплативших пользователей
-                for user_id, entries in paid_users.items():
-                    for entry in entries:
-                        cur.execute("""
-                            INSERT INTO paid_users (user_id, network, city, end_date)
-                            VALUES (?, ?, ?, ?)
-                        """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+                    # Сохраняем оплативших пользователей
+                    for user_id, entries in paid_users.items():
+                        for entry in entries:
+                            cur.execute("""
+                                INSERT INTO paid_users (user_id, network, city, end_date)
+                                VALUES (?, ?, ?, ?)
+                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
-                # Сохраняем админов
-                for user_id in admin_users:
-                    cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+                    # Сохраняем админов
+                    for user_id in admin_users:
+                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                # Сохраняем публикации
-                for user_id, posts in user_posts.items():
-                    for post in posts:
-                        cur.execute("""
-                            INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
+                    # Сохраняем публикации
+                    for user_id, posts in user_posts.items():
+                        for post in posts:
+                            cur.execute("""
+                                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                user_id, post["network"], post["city"],
+                                post["time"], post["chat_id"], post["message_id"]
+                            ))
 
-                conn.commit()  # Фиксируем транзакцию
-                print("[DEBUG] Данные сохранены.")
-        except Exception as e:
-            print(f"[ERROR] Ошибка при сохранении данных: {e}")
+                    conn.commit()
+                    print("[DEBUG] Данные успешно сохранены.")
+                    return  # Успешно, выходим
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower():
+                    print(f"[WARN] Попытка {attempt+1} — БД заблокирована, пробуем снова через {delay} сек...")
+                    time.sleep(delay)
+                else:
+                    print(f"[ERROR] Ошибка при сохранении данных: {e}")
+                    break
+            except Exception as e:
+                print(f"[ERROR] Ошибка при сохранении данных: {e}")
+                break
+    else:
+        print("[ERROR] Не удалось сохранить данные после нескольких попыток.")
 
 # Клавиатура выбора сети
 def get_network_markup():
@@ -1249,6 +1270,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         print(f"[ERROR] Ошибка при публикации объявления: {e}")
         bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
         return None
+
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
