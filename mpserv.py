@@ -1198,6 +1198,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         network = None
         city = None
 
+        # Определяем сеть и город
         if chat_id in chat_ids_mk.values():
             network = "Мужской Клуб"
             for city_name, city_chat_id in chat_ids_mk.items():
@@ -1217,17 +1218,21 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
                     city = city_name
                     break
 
+        # Проверяем лимит
         if not check_daily_limit(user_id, network, city):
             bot.send_message(user_id, f"Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
             return None
 
+        # Формируем текст объявления
         signature = network_signatures.get(network, "")
         full_text = f"Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
+        # Создаём кнопку "Написать"
         markup = types.InlineKeyboardMarkup()
         if not user_name.startswith("@"):
             markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
 
+        # Публикуем объявление
         if media_type == "photo":
             sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
         elif media_type == "video":
@@ -1235,6 +1240,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
+        # Сохраняем информацию о публикации
         if user_id not in user_posts:
             user_posts[user_id] = []
         user_posts[user_id].append({
@@ -1244,14 +1250,17 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
             "city": city,
             "network": network
         })
+
+        # Обновляем статистику
         update_daily_posts(user_id, network, city)
         save_data()
 
         # Уведомляем пользователя об успешной публикации
         bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
         return sent_message
+
     except Exception as e:
-        print(f"Ошибка при публикации объявления: {e}")
+        print(f"[ERROR] Ошибка при публикации объявления: {e}")
         bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
         return None
 
