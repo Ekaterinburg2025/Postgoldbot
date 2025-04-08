@@ -95,22 +95,23 @@ def init_db():
 
 # Загрузка данных при старте
 def load_data():
-with db_lock:
-    try:
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
+    with db_lock:
+        try:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
 
-    # Загружаем оплативших пользователей
-    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
-    paid_users = {}
-    for user_id, network, city, end_date in cur.fetchall():
-        if user_id not in paid_users:
-            paid_users[user_id] = []
-        paid_users[user_id].append({
-            "network": network,
-            "city": city,
-            "end_date": datetime.fromisoformat(end_date)
-        })
+                # Загружаем оплативших пользователей
+                cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+                global paid_users
+                paid_users = {}
+                for user_id, network, city, end_date in cur.fetchall():
+                    if user_id not in paid_users:
+                        paid_users[user_id] = []
+                    paid_users[user_id].append({
+                        "network": network,
+                        "city": city,
+                        "end_date": datetime.fromisoformat(end_date)
+                    })
 
     # Загружаем админов
     cur.execute("SELECT user_id FROM admin_users")
