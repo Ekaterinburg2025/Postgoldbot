@@ -11,7 +11,7 @@ from telebot import types
 from flask import Flask, request, abort
 from telebot.apihelper import ApiTelegramException
 from pytz import timezone
-tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
+ekaterinburg_tz = pytz.timezone('Asia/Yekaterinburg')
 
 def get_current_time():
     return datetime.now(tz).isoformat()
@@ -402,7 +402,8 @@ def is_new_day(last_post_time):
     if isinstance(last_post_time, str):
         last_post_time = datetime.fromisoformat(last_post_time)
 
-    current_time = datetime.now()
+current_time = datetime.now(ekaterinburg_tz)
+print(current_time)
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
@@ -523,7 +524,8 @@ def is_new_day(last_post_time):
     """Проверяет, наступил ли новый день."""
     if last_post_time is None:
         return True  # Если last_post_time отсутствует, считаем, что новый день
-    current_time = datetime.now()
+current_time = datetime.now(ekaterinburg_tz)
+print(current_time)
     return current_time.date() > last_post_time.date()
 
 # Получение имени пользователя
@@ -1157,11 +1159,16 @@ def handle_delete_post(message):
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
                 with db_lock:  # Блокировка для работы с базой
+                    # Пытаемся удалить сообщение
                     bot.delete_message(post["chat_id"], post["message_id"])
+                    # Убираем пост из списка пользователя
                     user_posts[user_id].remove(post)
+                    # Обновляем статистику
                     update_daily_posts(user_id, post["network"], post["city"], remove=True)
-                    save_data()  # Сохраняем данные
+                    # Сохраняем данные
+                    save_data()
 
+                # Уведомляем пользователя об успешном удалении
                 bot.send_message(user_id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
@@ -1169,6 +1176,7 @@ def handle_delete_post(message):
                 bot.send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
                 return
 
+    # Если пост не найден
     bot.send_message(user_id, "Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
@@ -1233,19 +1241,19 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        with db_lock:  # Блокировка для работы с базой
-            if user_id not in user_posts:
-                user_posts[user_id] = []
-            user_posts[user_id].append({
-                "message_id": sent_message.message_id,
-                "chat_id": chat_id,
-                "time": datetime.now(),
-                "city": city,
-                "network": network
-            })
-            update_daily_posts(user_id, network, city)
-            save_data()
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "message_id": sent_message.message_id,
+            "chat_id": chat_id,
+            "time": datetime.now(),
+            "city": city,
+            "network": network
+        })
+        update_daily_posts(user_id, network, city)
+        save_data()
 
+        # Уведомляем пользователя об успешной публикации
         bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
         return sent_message
     except Exception as e:
