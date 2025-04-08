@@ -3,13 +3,13 @@ import os
 import json
 import sqlite3
 import logging
+import threading
 from datetime import datetime, timedelta
 import pytz
 import telebot
 from telebot import types
 from flask import Flask, request, abort
 from telebot.apihelper import ApiTelegramException
-from threading import Lock
 from pytz import timezone
 tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
 
