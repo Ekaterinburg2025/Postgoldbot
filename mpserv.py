@@ -1094,8 +1094,6 @@ def handle_delete_post(message):
     for post in user_posts[message.chat.id]:
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
-            try:
                 print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
                 bot.delete_message(post['chat_id'], post['message_id'])
             except telebot.apihelper.ApiTelegramException as e:
