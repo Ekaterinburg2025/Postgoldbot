@@ -227,24 +227,25 @@ network_signatures = {
 init_db()
 
 def load_paid_users():
-    with db_lock:
-        with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
+    with db_lock:  # Блокируем доступ к данным
+        with sqlite3.connect("bot_data.db") as conn:  # Открываем соединение с базой данных
+            cur = conn.cursor()
 
-    cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
-    paid_users = {}
+            # Выполняем SQL-запрос
+            cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+            paid_users = {}
 
-    for user_id, network, city, end_date in cur.fetchall():
-        if user_id not in paid_users:
-            paid_users[user_id] = []
-        paid_users[user_id].append({
-            "network": network,
-            "city": city,
-            "end_date": datetime.fromisoformat(end_date)
-        })
+            # Обрабатываем результаты запроса
+            for user_id, network, city, end_date in cur.fetchall():
+                if user_id not in paid_users:
+                    paid_users[user_id] = []
+                paid_users[user_id].append({
+                    "network": network,
+                    "city": city,
+                    "end_date": datetime.fromisoformat(end_date)
+                })
 
-    conn.close()
-    return paid_users
+            return paid_users  # Возвращаем данные
 
 def add_paid_user(user_id, network, city, end_date):
     with db_lock:  
