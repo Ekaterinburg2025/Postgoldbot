@@ -1146,6 +1146,7 @@ def delete_all_posts(message):
 
 def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
     try:
+        # Определяем сеть и город по chat_id
         network = None
         city = None
 
@@ -1168,28 +1169,47 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
                     city = city_name
                     break
 
+        # Проверяем лимит публикаций
         if not check_daily_limit(user_id, network, city):
             bot.send_message(user_id, f" Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
             return None
 
+        # Формируем текст с подписью
         signature = network_signatures.get(network, "")
         full_text = f" Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
+        # Добавляем кнопку "Написать", если username отсутствует
         markup = types.InlineKeyboardMarkup()
         if not user_name.startswith("@"):
             markup.add(types.InlineKeyboardButton("Написать", url=f"https://t.me/user?id={user_id}"))
 
+        # Публикуем объявление
         if media_type == "photo":
             sent_message = bot.send_photo(chat_id, file_id, caption=full_text, reply_markup=markup)
         elif media_type == "video":
             sent_message = bot.send_video(chat_id, file_id, caption=full_text, reply_markup=markup)
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
-if sent_message:
-            bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-            return sent_message
+
+        # Сохраняем данные о сообщении
+        if user_id not in user_posts:
+            user_posts[user_id] = []
+        user_posts[user_id].append({
+            "message_id": sent_message.message_id,
+            "chat_id": chat_id,
+            "time": datetime.now(),
+            "city": city,
+            "network": network
+        })
+        save_data()
+        print(f"[DEBUG] Сообщение сохранено: user_id={user_id}, chat_id={chat_id}, message_id={sent_message.message_id}")
+
+        # Возвращаем отправленное сообщение
+        return sent_message
+
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
+        bot.send_message(user_id, f"Ошибка при публикации объявления: {e}")
         return None
 
         # Сохраняем данные о сообщении
