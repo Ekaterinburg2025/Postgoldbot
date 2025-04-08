@@ -1104,8 +1104,6 @@ def handle_delete_post(message):
                     pass
                 else:
                     raise
-                user_posts[message.chat.id].remove(post)
-                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
                 bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
                 return
