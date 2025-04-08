@@ -1017,127 +1017,73 @@ def process_text(message):
     # Подтверждение текста
     confirm_text(message, text, media_type, file_id)
 
-def confirm_text(message, text, media_type=None, file_id=None):
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да", "Нет")
-    bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
-
-def handle_confirmation(message, text, media_type, file_id):
-    if message.text.lower() == "да":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
-    elif message.text.lower() == "нет":
-        bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
-        bot.register_next_step_handler(message, process_text)
-    else:
-        bot.send_message(message.chat.id, " Неверный ответ. Выберите 'Да' или 'Нет'.")
-        bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
-
-def select_network(message, text, media_type, file_id):
-    if message.text == "Назад":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
-        bot.register_next_step_handler(message, process_text)
-        return
-
-    selected_network = message.text
-    if selected_network in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        if selected_network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif selected_network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif selected_network == "НС":
-            cities = list(chat_ids_ns.keys())
-        elif selected_network == "Все сети":
-            cities = list(set(list(chat_ids_mk.keys()) + list(chat_ids_parni.keys()) + list(chat_ids_ns.keys())))
-        for city in cities:
-            markup.add(city)
-        markup.add("Выбрать другую сеть", "Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для публикации или нажмите 'Выбрать другую сеть':", reply_markup=markup)
-        bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
-    else:
-        bot.send_message(message.chat.id, " Ошибка! Выберите правильную сеть.")
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
-
-def select_city_and_publish(message, text, selected_network, media_type, file_id):
-    if message.text == "Назад":
-        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
-        return
+def select_city_and_publish_webhook(message, state_data):
+    text = state_data['text']
+    selected_network = state_data['selected_network']
+    media_type = state_data['media_type']
+    file_id = state_data['file_id']
 
     city = message.text
-    if city == "Выбрать другую сеть":
-        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+
+    if city == "Назад":
+        markup = get_network_markup()
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=markup)
+        user_state[message.from_user.id] = {
+            'step': 'select_network',
+            'data': {
+                'text': text,
+                'media_type': media_type,
+                'file_id': file_id
+            }
+        }
         return
 
-    user_id = message.from_user.id
-    user_name = get_user_name(message.from_user)
+    if city == "Выбрать другую сеть":
+        markup = get_network_markup()
+        safe_send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=markup)
+        user_state[message.from_user.id] = {
+            'step': 'select_network',
+            'data': {
+                'text': text,
+                'media_type': media_type,
+                'file_id': file_id
+            }
+        }
+        return
 
-    if selected_network == "Все сети":
-        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
-    else:
-        networks = [selected_network]
+    if is_user_paid(message.from_user.id, selected_network, city):
+        user_name = get_user_name(message.from_user)
+        user_id = message.from_user.id
 
-    for network in networks:
-        if network == "Мужской Клуб":
-            chat_dict = chat_ids_mk
-        elif network == "ПАРНИ 18+":
-            chat_dict = chat_ids_parni
-        elif network == "НС":
-            chat_dict = chat_ids_ns
+        if selected_network == "Все сети":
+            networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
         else:
-            continue
+            networks = [selected_network]
 
-        target_city = ns_city_substitution[city] if (network == "НС" and city in ns_city_substitution) else city
-
-        if target_city in chat_dict:
-            chat_id = chat_dict[target_city]
-
-            if not is_user_paid(user_id, network, city):
-                markup = types.InlineKeyboardMarkup()
-                if selected_network == "Мужской Клуб":
-                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
-                else:
-                    markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
-                safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
-                continue
-
-            if not check_daily_limit(user_id, network, city):
-                safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
-                continue
-
-            sent_message = send_post(chat_id, text, user_name, user_id, media_type, file_id)
-
-            if sent_message:
-                # Сохраняем информацию о посте
-                if message.chat.id not in user_posts:
-                    user_posts[message.chat.id] = []
-                user_posts[message.chat.id].append({
-                    "message_id": sent_message.message_id,
-                    "chat_id": chat_id,
-                    "time": datetime.now(),
-                    "city": city,
-                    "network": network
-                })
-
-                update_daily_posts(user_id, network, city)
-
-                if user_id not in user_statistics:
-                    user_statistics[user_id] = {"count": 0}
-                user_statistics[user_id]["count"] += 1
-
-                save_data()
-
-                safe_send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+        for network in networks:
+            if network == "Мужской Клуб":
+                chat_dict = chat_ids_mk
+            elif network == "ПАРНИ 18+":
+                chat_dict = chat_ids_parni
+            elif network == "НС":
+                chat_dict = chat_ids_ns
             else:
-                safe_send_message(message.chat.id, f"❌ Не удалось отправить сообщение в «{network}», город {city}.")
-        else:
-            safe_send_message(message.chat.id, f"❌ Ошибка! Город '{target_city}' не найден в сети «{network}».")
+                continue
 
-    ask_for_new_post(message)
+            city_for_network = ns_city_substitution.get(city, city) if network == "НС" else city
 
+            if city_for_network in chat_dict:
+                chat_id = chat_dict[city_for_network]
+                if not check_daily_limit(user_id, network, city_for_network):
+                    safe_send_message(message.chat.id, f"⛔ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city_for_network}. Попробуйте завтра.")
+                    continue
+
+                sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
+                if sent_message:
+                    safe_send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city_for_network}.")
+            else:
+                safe_send_message(message.chat.id, f"❗ Ошибка: город '{city}' не найден в сети «{network}».")
+        ask_for_new_post(message)
     else:
         markup = types.InlineKeyboardMarkup()
         if selected_network == "Мужской Клуб":
@@ -1145,36 +1091,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         else:
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
         safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
-
-def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да", "Нет")
-    bot.send_message(message.chat.id, "Хотите опубликовать ещё одно объявление?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_new_post_choice)
-
-def handle_new_post_choice(message):
-    if message.text.lower() == "да":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
-        bot.register_next_step_handler(message, process_text)
-    else:
-        bot.send_message(
-            message.chat.id,
-            "Спасибо за использование бота! \nЕсли хотите создать новое объявление, нажмите кнопку ниже.",
-            reply_markup=get_main_keyboard()
-        )
-
-@bot.message_handler(func=lambda message: message.text == "Удалить объявление")
-def delete_post(message):
-    if message.chat.id not in user_posts or not user_posts[message.chat.id]:
-        bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
-        return
-
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    for post in user_posts[message.chat.id]:
-        markup.add(f"Удалить объявление в {post['city']} ({post['network']})")
-    markup.add("Назад")
-    bot.send_message(message.chat.id, "Выберите объявление для удаления:", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_delete_post)
 
 def handle_delete_post(message):
     try:
