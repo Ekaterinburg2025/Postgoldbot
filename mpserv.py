@@ -1132,7 +1132,7 @@ def delete_post(message):
 def handle_delete_post(message):
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
-def delete_all_posts(message):
+def handle_delete_all_posts(message):
     user_id = message.chat.id
     if user_id not in user_posts or not user_posts[user_id]:
         safe_send_message(user_id, "У вас нет опубликованных объявлений.")
@@ -1142,14 +1142,7 @@ def delete_all_posts(message):
 
     for post in list(user_posts[user_id]):
         try:
-            try:
-                bot.delete_message(post["chat_id"], post["message_id"])
-            except Exception as e:
-                if "message to delete not found" in str(e):
-                    print(f"[INFO] Сообщение уже удалено: {e}")
-                else:
-                    raise
-
+            bot.delete_message(post["chat_id"], post["message_id"])
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
             deleted_count += 1
         except Exception as e:
