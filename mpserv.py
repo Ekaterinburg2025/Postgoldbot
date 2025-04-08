@@ -1096,12 +1096,12 @@ def handle_delete_post(message):
             try:
                 print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
                 try:
-        bot.delete_message(post["chat_id"], post["message_id"])
-    except telebot.apihelper.ApiTelegramException as e:
-        if 'message to delete not found' in str(e):
-            pass
-        else:
-            raise
+    bot.delete_message(post["chat_id"], post["message_id"])
+except telebot.apihelper.ApiTelegramException as e:
+    if 'message to delete not found' in str(e):
+        pass
+    else:
+        raise
                 user_posts[message.chat.id].remove(post)
                 update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
                 save_data()
@@ -1125,12 +1125,12 @@ def delete_all_posts(message):
         try:
             print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")  # Логирование
             try:
-        bot.delete_message(post["chat_id"], post["message_id"])
-    except telebot.apihelper.ApiTelegramException as e:
-        if 'message to delete not found' in str(e):
-            pass
-        else:
-            raise
+    bot.delete_message(post["chat_id"], post["message_id"])
+except telebot.apihelper.ApiTelegramException as e:
+    if 'message to delete not found' in str(e):
+        pass
+    else:
+        raise
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
         except Exception as e:
             print(f"[ERROR] Ошибка при удалении объявления: {e}")  # Логирование
