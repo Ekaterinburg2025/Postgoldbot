@@ -95,9 +95,9 @@ def init_db():
 
 # Загрузка данных при старте
 def load_data():
-    with db_lock:
+    with db_lock:  # Блокируем доступ к данным
         try:
-            with sqlite3.connect("bot_data.db") as conn:
+            with sqlite3.connect("bot_data.db") as conn:  # Открываем соединение с базой данных
                 cur = conn.cursor()
 
                 # Загружаем оплативших пользователей
@@ -113,26 +113,29 @@ def load_data():
                         "end_date": datetime.fromisoformat(end_date)
                     })
 
-    # Загружаем админов
-    cur.execute("SELECT user_id FROM admin_users")
-    admin_users = [row[0] for row in cur.fetchall()]
+                # Загружаем админов
+                cur.execute("SELECT user_id FROM admin_users")
+                admin_users = [row[0] for row in cur.fetchall()]
 
-    # Загружаем публикации
-    cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
-    user_posts = {}
-    for user_id, network, city, time, chat_id, message_id in cur.fetchall():
-        if user_id not in user_posts:
-            user_posts[user_id] = []
-        user_posts[user_id].append({
-            "network": network,
-            "city": city,
-            "time": time,
-            "chat_id": chat_id,
-            "message_id": message_id
-        })
+                # Загружаем публикации
+                cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+                user_posts = {}
+                for user_id, network, city, time, chat_id, message_id in cur.fetchall():
+                    if user_id not in user_posts:
+                        user_posts[user_id] = []
+                    user_posts[user_id].append({
+                        "network": network,
+                        "city": city,
+                        "time": time,
+                        "chat_id": chat_id,
+                        "message_id": message_id
+                    })
 
-    conn.close()
-    return paid_users, admin_users, user_posts
+                return paid_users, admin_users, user_posts  # Возвращаем данные
+
+        except Exception as e:
+            print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
+            return {}, [], {}  # Возвращаем пустые данные в случае ошибки
 
 # Инициализация базы данных
 init_db()
