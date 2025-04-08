@@ -407,28 +407,20 @@ def is_new_day(last_post_time):
     return current_time.date() > last_post_time.date()
 
 def get_user_statistics(user_id):
-    """Возвращает статистику публикаций для пользователя."""
     stats = {"published": 0, "remaining": 9, "details": {}}
-
     if user_id in user_daily_posts:
-        for network in user_daily_posts[user_id]:
+        for network, cities in user_daily_posts[user_id].items():
             stats["details"][network] = {}
-            for city in user_daily_posts[user_id][network]:
-                # Считаем активные и удалённые публикации
-                active_posts = len(user_daily_posts[user_id][network][city]["posts"])
-                deleted_posts = len(user_daily_posts[user_id][network][city]["deleted_posts"])
+            for city, post_data in cities.items():
+                active_posts = len(post_data["posts"])
+                deleted_posts = len(post_data["deleted_posts"])
                 total_posts = active_posts + deleted_posts
-
                 stats["details"][network][city] = {
-                    "published": total_posts,  # Все публикации (активные + удалённые)
-                    "remaining": max(0, 3 - total_posts)  # Оставшиеся публикации
+                    "published": total_posts,
+                    "remaining": max(0, 3 - total_posts)
                 }
                 stats["published"] += total_posts
-
-        # Общий лимит для режима "Все сети"
         stats["remaining"] = max(0, 9 - stats["published"])
-
-    print(f"[DEBUG] Статистика для пользователя {user_id}: {stats}")
     return stats
 
 def is_today(timestamp):
@@ -619,32 +611,15 @@ def update_daily_posts(user_id, network, city, remove=False):
         user_daily_posts[user_id][network] = {}
 
     if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {
-            "posts": [],
-            "deleted_posts": [],
-            "last_post_time": None
-        }
+        user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
+    current_time = datetime.now()  # Используем текущее время
     if remove:
-        if user_daily_posts[user_id][network][city]["posts"]:
-            deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
-            user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
-            print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
+        user_daily_posts[user_id][network][city]["deleted_posts"].append(current_time)
     else:
-        post_time = get_current_time()
-        if post_time not in user_daily_posts[user_id][network][city]["posts"]:
-            user_daily_posts[user_id][network][city]["posts"].append(post_time)
-            user_daily_posts[user_id][network][city]["last_post_time"] = parse_time(post_time)
-            print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
-
-            # Счётчик увеличивается только при публикации
-            if user_id not in user_statistics:
-                user_statistics[user_id] = {"count": 0}
-            user_statistics[user_id]["count"] += 1
-            print(f"[DEBUG] Счётчик увеличен: user_id={user_id}, count={user_statistics[user_id]['count']}")
+        user_daily_posts[user_id][network][city]["posts"].append(current_time)
 
     save_data()
-    print(f"[DEBUG] Данные сохранены для пользователя {user_id}.")
 
 @bot.message_handler(commands=['my_stats'])
 def show_user_statistics(message):
@@ -1221,7 +1196,7 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
             return None
 
         signature = network_signatures.get(network, "")
-        full_text = f" Объявление от {user_name}:\n\n{text}\n\n{signature}"
+        full_text = f"Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
         markup = types.InlineKeyboardMarkup()
         if not user_name.startswith("@"):
@@ -1245,9 +1220,13 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         })
         update_daily_posts(user_id, network, city)
         save_data()
+
+        # Уведомляем пользователя об успешной публикации
+        bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
+        bot.send_message(user_id, f"❌ Ошибка при публикации объявления: {e}")
         return None
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
