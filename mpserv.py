@@ -1062,20 +1062,37 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 continue
 
             # Подмена названия города в НС
-            if network == "НС" and city in ns_city_substitution:
-                city = ns_city_substitution[city]
+            adjusted_city = ns_city_substitution[city] if network == "НС" and city in ns_city_substitution else city
 
-            if city in chat_dict:
-                chat_id = chat_dict[city]
-                if not check_daily_limit(user_id, network, city):
-                    safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
+            if adjusted_city in chat_dict:
+                chat_id = chat_dict[adjusted_city]
+                if not check_daily_limit(user_id, network, adjusted_city):
+                    safe_send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {adjusted_city}. Попробуйте завтра.")
                     continue
 
                 sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
                 if sent_message:
-                    safe_send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                    if user_id not in user_posts:
+                        user_posts[user_id] = []
+                    user_posts[user_id].append({
+                        "message_id": sent_message.message_id,
+                        "chat_id": chat_id,
+                        "time": get_current_time(),
+                        "city": adjusted_city,
+                        "network": network
+                    })
+
+                    update_daily_posts(user_id, network, adjusted_city)
+
+                    if user_id not in user_statistics:
+                        user_statistics[user_id] = {"count": 0}
+                    user_statistics[user_id]["count"] += 1
+
+                    save_data()
+
+                    safe_send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {adjusted_city}.")
             else:
-                safe_send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
+                safe_send_message(message.chat.id, f"❌ Ошибка! Город '{adjusted_city}' не найден в сети «{network}».")
         ask_for_new_post(message)
     else:
         markup = types.InlineKeyboardMarkup()
@@ -1117,17 +1134,17 @@ def delete_post(message):
 
 def handle_delete_post(message):
     if message.text == "Назад":
-        bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
+        safe_send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
 
-    if message.chat.id not in user_posts or not user_posts[message.chat.id]:
-        bot.send_message(message.chat.id, "У вас нет опубликованных объявлений.")
+    user_id = message.chat.id
+    if user_id not in user_posts or not user_posts[user_id]:
+        safe_send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
-    for post in list(user_posts[message.chat.id]):  # Копия списка для безопасной итерации
+    for post in list(user_posts[user_id]):
         if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
             try:
-                print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
                 try:
                     bot.delete_message(post["chat_id"], post["message_id"])
                 except Exception as e:
@@ -1135,28 +1152,36 @@ def handle_delete_post(message):
                         print(f"[INFO] Сообщение уже удалено: {e}")
                     else:
                         raise
-                user_posts[message.chat.id].remove(post)
-                update_daily_posts(message.chat.id, post["network"], post["city"], remove=True)
+
+                user_posts[user_id].remove(post)
+                update_daily_posts(user_id, post["network"], post["city"], remove=True)
+
+                # Обновим статистику
+                if user_id in user_statistics:
+                    user_statistics[user_id]["count"] = max(0, user_statistics[user_id]["count"] - 1)
+
                 save_data()
-                bot.send_message(message.chat.id, "✅ Объявление успешно удалено.")
+                safe_send_message(user_id, "✅ Объявление успешно удалено.")
                 return
             except Exception as e:
                 print(f"[ERROR] Ошибка при удалении объявления: {e}")
-                bot.send_message(message.chat.id, f"⚠️ Ошибка при удалении объявления: {e}")
+                safe_send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
                 return
 
-    bot.send_message(message.chat.id, " Объявление не найдено.")
+    safe_send_message(user_id, "Объявление не найдено.")
+
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
     user_id = message.chat.id
     if user_id not in user_posts or not user_posts[user_id]:
-        bot.send_message(user_id, "У вас нет опубликованных объявлений.")
+        safe_send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
-    for post in list(user_posts[user_id]):  # Копия списка
+    deleted_count = 0
+
+    for post in list(user_posts[user_id]):
         try:
-            print(f"[DEBUG] Удаление сообщения: chat_id={post['chat_id']}, message_id={post['message_id']}")
             try:
                 bot.delete_message(post["chat_id"], post["message_id"])
             except Exception as e:
@@ -1164,14 +1189,16 @@ def delete_all_posts(message):
                     print(f"[INFO] Сообщение уже удалено: {e}")
                 else:
                     raise
+
             update_daily_posts(user_id, post["network"], post["city"], remove=True)
+            deleted_count += 1
         except Exception as e:
             print(f"[ERROR] Ошибка при удалении объявления: {e}")
-            bot.send_message(user_id, f"⚠️ Ошибка при удалении одного из объявлений: {e}")
+            safe_send_message(user_id, f"⚠️ Ошибка при удалении одного из объявлений: {e}")
 
     user_posts[user_id] = []
     save_data()
-    bot.send_message(user_id, "✅ Все объявления успешно удалены.")
+    safe_send_message(user_id, f"✅ Удалено объявлений: {deleted_count}")
 
 def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
     try:
