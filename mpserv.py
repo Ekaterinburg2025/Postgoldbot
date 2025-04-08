@@ -1130,6 +1130,24 @@ def delete_post(message):
     bot.register_next_step_handler(message, handle_delete_post)
 
 def handle_delete_post(message):
+    user_id = message.chat.id
+    if user_id not in user_posts or not user_posts[user_id]:
+        bot.send_message(user_id, "У вас нет опубликованных объявлений.")
+        return
+
+    for post in list(user_posts[user_id]):
+        if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
+            try:
+                bot.delete_message(post["chat_id"], post["message_id"])
+                user_posts[user_id].remove(post)
+                update_daily_posts(user_id, post["network"], post["city"], remove=True)
+                bot.send_message(user_id, "✅ Объявление успешно удалено.")
+                return
+            except Exception as e:
+                bot.send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
+                return
+
+    bot.send_message(user_id, "Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def handle_delete_all_posts(message):
