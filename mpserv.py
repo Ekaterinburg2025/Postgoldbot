@@ -461,37 +461,39 @@ def validate_text_length(text):
 def save_data():
     """Сохраняет данные в базу данных."""
     with db_lock:  # Используем блокировку
-        conn = sqlite3.connect("bot_data.db")
-        cur = conn.cursor()
+        try:
+            with sqlite3.connect("bot_data.db") as conn:  # Используем контекстный менеджер
+                cur = conn.cursor()
 
-        # Очищаем таблицы
-        cur.execute("DELETE FROM paid_users")
-        cur.execute("DELETE FROM admin_users")
-        cur.execute("DELETE FROM user_posts")
+                # Очищаем таблицы
+                cur.execute("DELETE FROM paid_users")
+                cur.execute("DELETE FROM admin_users")
+                cur.execute("DELETE FROM user_posts")
 
-        # Сохраняем оплативших пользователей
-        for user_id, entries in paid_users.items():
-            for entry in entries:
-                cur.execute("""
-                    INSERT INTO paid_users (user_id, network, city, end_date)
-                    VALUES (?, ?, ?, ?)
-                """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+                # Сохраняем оплативших пользователей
+                for user_id, entries in paid_users.items():
+                    for entry in entries:
+                        cur.execute("""
+                            INSERT INTO paid_users (user_id, network, city, end_date)
+                            VALUES (?, ?, ?, ?)
+                        """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
-        # Сохраняем админов
-        for user_id in admin_users:
-            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+                # Сохраняем админов
+                for user_id in admin_users:
+                    cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-        # Сохраняем публикации
-        for user_id, posts in user_posts.items():
-            for post in posts:
-                cur.execute("""
-                    INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
+                # Сохраняем публикации
+                for user_id, posts in user_posts.items():
+                    for post in posts:
+                        cur.execute("""
+                            INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (user_id, post["network"], post["city"], post["time"], post["chat_id"], post["message_id"]))
 
-        conn.commit()
-        conn.close()
-        print("[DEBUG] Данные сохранены.")
+                conn.commit()  # Фиксируем транзакцию
+                print("[DEBUG] Данные сохранены.")
+        except Exception as e:
+            print(f"[ERROR] Ошибка при сохранении данных: {e}")
 
 # Клавиатура выбора сети
 def get_network_markup():
@@ -604,22 +606,31 @@ def check_daily_limit(user_id, network, city):
         return total_posts < limit
 
 def update_daily_posts(user_id, network, city, remove=False):
-    if user_id not in user_daily_posts:
-        user_daily_posts[user_id] = {}
+    try:
+        with db_lock:
+            if user_id not in user_daily_posts:
+                user_daily_posts[user_id] = {}
 
-    if network not in user_daily_posts[user_id]:
-        user_daily_posts[user_id][network] = {}
+            if network not in user_daily_posts[user_id]:
+                user_daily_posts[user_id][network] = {}
 
-    if city not in user_daily_posts[user_id][network]:
-        user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
+            if city not in user_daily_posts[user_id][network]:
+                user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-    current_time = datetime.now()  # Используем текущее время
-    if remove:
-        user_daily_posts[user_id][network][city]["deleted_posts"].append(current_time)
-    else:
-        user_daily_posts[user_id][network][city]["posts"].append(current_time)
+            current_time = datetime.now()
 
-    save_data()
+            if remove:
+                if user_daily_posts[user_id][network][city]["posts"]:
+                    deleted_post = user_daily_posts[user_id][network][city]["posts"].pop()
+                    user_daily_posts[user_id][network][city]["deleted_posts"].append(deleted_post)
+                    print(f"[DEBUG] Удалено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
+            else:
+                user_daily_posts[user_id][network][city]["posts"].append(current_time)
+                print(f"[DEBUG] Добавлено сообщение для пользователя {user_id} в сети {network}, городе {city}.")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при обновлении статистики: {e}")
+    finally:
+        save_data()
 
 @bot.message_handler(commands=['my_stats'])
 def show_user_statistics(message):
