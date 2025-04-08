@@ -8,6 +8,7 @@ import pytz
 import telebot
 from telebot import types
 from flask import Flask, request, abort
+from telebot.apihelper import ApiTelegramException
 import threading
 from pytz import timezone
 tz = timezone("Asia/Yekaterinburg")  # Екатеринбург
@@ -237,8 +238,9 @@ def load_paid_users():
     return paid_users
 
 def add_paid_user(user_id, network, city, end_date):
-    # Преобразуем время в UTC
-    end_date_utc = end_date.astimezone(pytz.UTC)
+    paid_users[user_id].append({"network": network, "city": city, "end_date": end_date})
+    save_data()
+    safe_send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
 
     # Добавляем пользователя в список оплативших
     if user_id not in paid_users:
@@ -256,12 +258,9 @@ def add_paid_user(user_id, network, city, end_date):
     bot.send_message(user_id, f"✅ Вы добавлены в сеть «{network}», город {city} на {end_date.strftime('%Y-%m-%d')}.")
 
 def add_admin_user(user_id):
-    # Добавляем пользователя в список администраторов
-    if user_id not in admin_users:
-        admin_users.append(user_id)
-        save_data()
-        bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
-        bot.send_message(user_id, "✅ Вы добавлены как администратор.")
+    admins.append(user_id)
+    save_data()
+    safe_send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
 
 def remove_paid_user(user_id):
     conn = sqlite3.connect("bot_data.db")
@@ -1131,43 +1130,6 @@ def delete_post(message):
     bot.register_next_step_handler(message, handle_delete_post)
 
 def handle_delete_post(message):
-    if message.text == "Назад":
-        safe_send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
-        return
-
-    user_id = message.chat.id
-    if user_id not in user_posts or not user_posts[user_id]:
-        safe_send_message(user_id, "У вас нет опубликованных объявлений.")
-        return
-
-    for post in list(user_posts[user_id]):
-        if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
-            try:
-                try:
-                    bot.delete_message(post["chat_id"], post["message_id"])
-                except Exception as e:
-                    if "message to delete not found" in str(e):
-                        print(f"[INFO] Сообщение уже удалено: {e}")
-                    else:
-                        raise
-
-                user_posts[user_id].remove(post)
-                update_daily_posts(user_id, post["network"], post["city"], remove=True)
-
-                # Обновим статистику
-                if user_id in user_statistics:
-                    user_statistics[user_id]["count"] = max(0, user_statistics[user_id]["count"] - 1)
-
-                save_data()
-                safe_send_message(user_id, "✅ Объявление успешно удалено.")
-                return
-            except Exception as e:
-                print(f"[ERROR] Ошибка при удалении объявления: {e}")
-                safe_send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
-                return
-
-    safe_send_message(user_id, "Объявление не найдено.")
-
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def delete_all_posts(message):
@@ -1240,7 +1202,6 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
         else:
             sent_message = bot.send_message(chat_id, full_text, reply_markup=markup)
 
-        # Сохраняем данные о сообщении
         if user_id not in user_posts:
             user_posts[user_id] = []
         user_posts[user_id].append({
@@ -1250,8 +1211,8 @@ def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=Non
             "city": city,
             "network": network
         })
+        update_daily_posts(user_id, network, city)
         save_data()
-        print(f"[DEBUG] Сообщение сохранено: user_id={user_id}, chat_id={chat_id}, message_id={sent_message.message_id}")  # Логирование
         return sent_message
     except Exception as e:
         print(f"Ошибка при публикации объявления: {e}")
