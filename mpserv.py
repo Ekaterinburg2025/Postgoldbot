@@ -95,9 +95,10 @@ def init_db():
 
 # Загрузка данных при старте
 def load_data():
-    with db_lock:
+with db_lock:
+    try:
         with sqlite3.connect("bot_data.db") as conn:
-    cur = conn.cursor()
+            cur = conn.cursor()
 
     # Загружаем оплативших пользователей
     cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
