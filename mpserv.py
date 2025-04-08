@@ -1135,7 +1135,7 @@ def handle_delete_post(message):
 def handle_delete_all_posts(message):
     user_id = message.chat.id
     if user_id not in user_posts or not user_posts[user_id]:
-        safe_send_message(user_id, "У вас нет опубликованных объявлений.")
+        bot.send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
     deleted_count = 0
@@ -1143,15 +1143,13 @@ def handle_delete_all_posts(message):
     for post in list(user_posts[user_id]):
         try:
             bot.delete_message(post["chat_id"], post["message_id"])
-            update_daily_posts(user_id, post["network"], post["city"], remove=True)
             deleted_count += 1
         except Exception as e:
             print(f"[ERROR] Ошибка при удалении объявления: {e}")
-            safe_send_message(user_id, f"⚠️ Ошибка при удалении одного из объявлений: {e}")
+            bot.send_message(user_id, f"⚠️ Ошибка при удалении одного из объявлений: {e}")
 
     user_posts[user_id] = []
-    save_data()
-    safe_send_message(user_id, f"✅ Удалено объявлений: {deleted_count}")
+    bot.send_message(user_id, f"✅ Удалено объявлений: {deleted_count}")
 
 def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
     try:
