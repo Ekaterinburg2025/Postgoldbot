@@ -1069,18 +1069,19 @@ def handle_all_messages(message):
         else:
             bot.send_message(message.chat.id, "Пожалуйста, выберите: ✅ Да, ✏️ Изменить или ❌ Отмена.")
 
-    # === ШАГ 3: Выбор сети ===
-    elif step == "choose_network":
-        selected_network = message.text
-        valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
-        if selected_network not in valid_networks:
-            safe_send_message(message.chat.id, "⛔ Неверная сеть. Пожалуйста, выберите из списка.")
-            return
+# === ШАГ 3: Выбор сети ===
+elif step == "choose_network":
+    selected_network = message.text.strip()  # ← убираем пробелы и переносы
+    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
 
-        data["network"] = selected_network
-        markup = get_city_markup(selected_network)
-        bot.send_message(message.chat.id, "🏙️ Выберите город:", reply_markup=markup)
-        state["step"] = "choose_city"
+    if selected_network not in valid_networks:
+        bot.send_message(message.chat.id, "⛔ Неверная сеть. Пожалуйста, выберите из списка.")
+        return
+
+    data["network"] = selected_network
+    markup = get_city_markup(selected_network)
+    bot.send_message(message.chat.id, "🏙️ Выберите город:", reply_markup=markup)
+    state["step"] = "choose_city"
 
     # === ШАГ 4: Выбор города и публикация ===
     elif step == "choose_city":
