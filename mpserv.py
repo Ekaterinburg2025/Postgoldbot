@@ -132,8 +132,7 @@ def load_data():
 
                 # Загружаем админов
                 cur.execute("SELECT user_id FROM admin_users")
-                global admins
-                admins = [row[0] for row in cur.fetchall()]
+                admin_users = [row[0] for row in cur.fetchall()]
 
                 # Загружаем публикации
                 cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
