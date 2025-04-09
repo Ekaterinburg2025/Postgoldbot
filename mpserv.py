@@ -1111,6 +1111,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         else:
             networks = [selected_network]
 
+        success = False  # Чтобы в конце знать, была ли хотя бы одна публикация
+
         for network in networks:
             if network == "Мужской Клуб":
                 chat_dict = chat_ids_mk
@@ -1133,16 +1135,13 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
             # Подпись сети
             signature = network_signatures.get(network, "")
-
-            # Формируем текст объявления
             full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-            # Публикуем
             chat_id = chat_dict[target_city]
             sent_message = publish_post(chat_id, full_text, user_name, user_id, media_type, file_id)
 
             if sent_message:
-                # Сохраняем данные для удаления
+                success = True
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
@@ -1153,7 +1152,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "network": network
                 })
 
-                # Обновляем лимиты и статистику
                 update_daily_posts(user_id, network, target_city)
                 if user_id not in user_statistics:
                     user_statistics[user_id] = {"count": 0}
@@ -1161,9 +1159,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 save_data()
 
-                # Отбивка пользователю
                 bot.send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
 
+        # ВАЖНО: вызывать ТОЛЬКО после цикла
         ask_for_new_post(message)
 
     else:
