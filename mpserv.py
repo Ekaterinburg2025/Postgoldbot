@@ -1121,6 +1121,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
+            # Заменяем название города для НС
             target_city = ns_city_substitution.get(city, city) if network == "НС" else city
 
             if target_city not in chat_dict:
@@ -1131,47 +1132,38 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"⚠️ Превышен лимит публикаций (3 в сутки) для «{network}», {target_city}.")
                 continue
 
-            # Подпись сети
-            signature = network_signatures.get(network, "")
-
-            # Формируем текст объявления
-            full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
-
-            # Публикуем
             chat_id = chat_dict[target_city]
-            sent_message = publish_post(chat_id, full_text, user_name, user_id, media_type, file_id)
+            sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id, network)
 
             if sent_message:
-                # Сохраняем для удаления
+                # Сохраняем данные для удаления
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
                     "message_id": sent_message.message_id,
                     "chat_id": chat_id,
                     "time": datetime.now(),
-                    "city": city,
+                    "city": target_city,
                     "network": network
                 })
 
                 # Обновляем лимиты и статистику
-                update_daily_posts(user_id, network, city)
+                update_daily_posts(user_id, network, target_city)
                 if user_id not in user_statistics:
                     user_statistics[user_id] = {"count": 0}
                 user_statistics[user_id]["count"] += 1
 
                 save_data()
 
-                # Отбивка пользователю
+                # Отбивка
                 bot.send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
 
         ask_for_new_post(message)
 
     else:
         markup = types.InlineKeyboardMarkup()
-        if selected_network == "Мужской Клуб":
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
-        else:
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
+        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
 
         bot.send_message(
             message.chat.id,
@@ -1180,10 +1172,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         )
 
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да", "Нет")
-    bot.send_message(message.chat.id, "📨 Хотите опубликовать ещё одно объявление?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_new_post_choice)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Создать новое объявление", "Моя статистика", "Удалить объявление", "Удалить все объявления")
+    bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
 
 def handle_new_post_choice(message):
     if message.text.lower() == "да":
