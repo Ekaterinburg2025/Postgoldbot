@@ -111,11 +111,10 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Загрузка данных при старте
 def load_data():
     with db_lock:  # Блокируем доступ к данным
         try:
-            with sqlite3.connect("bot_data.db") as conn:  # Открываем соединение с базой данных
+            with sqlite3.connect("bot_data.db") as conn:
                 cur = conn.cursor()
 
                 # Загружаем оплативших пользователей
@@ -133,28 +132,34 @@ def load_data():
 
                 # Загружаем админов
                 cur.execute("SELECT user_id FROM admin_users")
-                admin_users = [row[0] for row in cur.fetchall()]
+                global admins
+                admins = [row[0] for row in cur.fetchall()]
 
                 # Загружаем публикации
                 cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+                global user_posts
                 user_posts = {}
                 for user_id, network, city, time, chat_id, message_id in cur.fetchall():
                     if user_id not in user_posts:
                         user_posts[user_id] = []
+                    try:
+                        post_time = datetime.fromisoformat(time)
+                    except Exception:
+                        post_time = datetime.now()  # Фолбэк
+
                     user_posts[user_id].append({
-                        "message_id": sent_message.message_id,
+                        "message_id": message_id,
                         "chat_id": chat_id,
-                        "time": datetime.now(),
-                        "city": target_city,
+                        "time": post_time,
+                        "city": city,
                         "network": network
-})
+                    })
 
-
-                return paid_users, admin_users, user_posts  # Возвращаем данные
+                return paid_users, admins, user_posts
 
         except Exception as e:
             print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
-            return {}, [], {}  # Возвращаем пустые данные в случае ошибки
+            return {}, [], {}
 
 # Инициализация базы данных
 init_db()
@@ -1181,47 +1186,34 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
 # ==== СПРОСИТЬ ПРОДОЛЖЕНИЕ ====
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
 
-@bot.message_handler(func=lambda message: message.text in ["✅ Да", "❌ Нет"])
 def handle_new_post_choice(message):
     if message.text == "✅ Да":
         bot.send_message(message.chat.id, "✍️ Напишите текст объявления:", reply_markup=types.ReplyKeyboardRemove())
         bot.register_next_step_handler(message, process_text)
+    elif message.text == "❌ Нет":
+        bot.send_message(message.chat.id, "Спасибо за использование бота! 🙌", reply_markup=get_main_keyboard())
     else:
-        bot.send_message(
-            message.chat.id,
-            "Спасибо за использование бота! 🙌\nВы можете создать новое объявление в любой момент.",
-            reply_markup=get_main_keyboard()
-        )
+        bot.send_message(message.chat.id, "Пожалуйста, используйте кнопки ниже:", reply_markup=get_main_keyboard())
 
 # ==== УДАЛЕНИЕ ОБЪЯВЛЕНИЙ ====
-@bot.message_handler(func=lambda message: message.text == "Удалить объявление")
+@bot.message_handler(func=lambda m: m.text == "Удалить объявление")
 def handle_delete_post(message):
     user_id = message.chat.id
     if user_id in user_posts and user_posts[user_id]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
         for post in user_posts[user_id]:
-            time_formatted = post['time'] if isinstance(post['time'], str) else post['time'].strftime("%d.%m %H:%M")
-            button_text = f"Удалить: {time_formatted}, {post['city']}, {post['network']}"
+            if isinstance(post["time"], str):
+                post["time"] = datetime.fromisoformat(post["time"])
+            button_text = f"Удалить: {format_time(post['time'])}, {post['city']}, {post['network']}"
             markup.add(button_text)
         markup.add("Отмена")
         bot.send_message(user_id, "Выберите объявление для удаления:", reply_markup=markup)
         bot.register_next_step_handler(message, process_delete_choice)
-    else:
-        bot.send_message(user_id, "❌ У вас нет опубликованных объявлений.")
-
-@bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
-def handle_delete_all_posts(message):
-    user_id = message.chat.id
-    if user_id in user_posts and user_posts[user_id]:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        markup.add("Да, удалить всё", "Нет, отменить")
-        bot.send_message(user_id, "Вы уверены, что хотите удалить все свои объявления?", reply_markup=markup)
-        bot.register_next_step_handler(message, process_delete_all_choice)
     else:
         bot.send_message(user_id, "❌ У вас нет опубликованных объявлений.")
 
@@ -1231,35 +1223,43 @@ def process_delete_choice(message):
         bot.send_message(user_id, "Удаление отменено.", reply_markup=get_main_keyboard())
         return
 
-    try:
-        for post in list(user_posts[user_id]):
-            time_formatted = post['time'] if isinstance(post['time'], str) else post['time'].strftime("%d.%m %H:%M")
-            expected = f"Удалить: {time_formatted}, {post['city']}, {post['network']}"
-            if message.text == expected:
-                try:
-                    bot.delete_message(post["chat_id"], post["message_id"])
-                except Exception as e:
-                    print(f"[WARN] Ошибка удаления сообщения {post['message_id']}: {e}")
-                user_posts[user_id].remove(post)
-                bot.send_message(user_id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
-                return
-        bot.send_message(user_id, "❌ Объявление не найдено.", reply_markup=get_main_keyboard())
-    except Exception as e:
-        bot.send_message(user_id, f"❌ Ошибка: {e}", reply_markup=get_main_keyboard())
+    for post in list(user_posts.get(user_id, [])):
+        if isinstance(post["time"], str):
+            post["time"] = datetime.fromisoformat(post["time"])
+        expected = f"Удалить: {format_time(post['time'])}, {post['city']}, {post['network']}"
+        if message.text == expected:
+            try:
+                bot.delete_message(post["chat_id"], post["message_id"])
+            except Exception as e:
+                print(f"[Удаление] Ошибка: {e}")
+            user_posts[user_id].remove(post)
+            save_data()
+            bot.send_message(user_id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
+            return
+    bot.send_message(user_id, "❌ Объявление не найдено.")
+
+@bot.message_handler(func=lambda m: m.text == "Удалить все объявления")
+def handle_delete_all_posts(message):
+    user_id = message.chat.id
+    if user_id in user_posts and user_posts[user_id]:
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        markup.add("Да, удалить всё", "Нет, отменить")
+        bot.send_message(user_id, "Удалить все объявления?", reply_markup=markup)
+        bot.register_next_step_handler(message, process_delete_all_choice)
+    else:
+        bot.send_message(user_id, "❌ У вас нет опубликованных объявлений.")
 
 def process_delete_all_choice(message):
     user_id = message.chat.id
     if message.text == "Да, удалить всё":
-        try:
-            for post in list(user_posts[user_id]):
-                try:
-                    bot.delete_message(post["chat_id"], post["message_id"])
-                except Exception as e:
-                    print(f"[WARN] Ошибка при удалении одного из сообщений: {e}")
-            user_posts[user_id] = []
-            bot.send_message(user_id, "✅ Все объявления удалены.", reply_markup=get_main_keyboard())
-        except Exception as e:
-            bot.send_message(user_id, f"❌ Ошибка при удалении: {e}", reply_markup=get_main_keyboard())
+        for post in list(user_posts.get(user_id, [])):
+            try:
+                bot.delete_message(post["chat_id"], post["message_id"])
+            except Exception as e:
+                print(f"[Удаление всех] Ошибка: {e}")
+        user_posts[user_id] = []
+        save_data()
+        bot.send_message(user_id, "✅ Все объявления удалены.", reply_markup=get_main_keyboard())
     else:
         bot.send_message(user_id, "Удаление отменено.", reply_markup=get_main_keyboard())
 
@@ -1306,12 +1306,6 @@ def handle_stats_button(message):
     except Exception as e:
         print(f"[ERROR] Ошибка при показе статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
-
-@bot.message_handler(content_types=["text", "photo", "video"])
-def handle_all_messages(message):
-    state = user_state.get(message.chat.id)
-    if not state:
-        return  # Нет активного шага — игнорируем
 
 # Добавляем маршрут для проверки работоспособности сервиса (если зайти по корневому URL)
 @app.route('/')
