@@ -1106,10 +1106,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_name = get_user_name(message.from_user)
 
     if is_user_paid(user_id, selected_network, city):
-        networks = (
-            ["Мужской Клуб", "ПАРНИ 18+", "НС"]
-            if selected_network == "Все сети" else [selected_network]
-        )
+        if selected_network == "Все сети":
+            networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
+        else:
+            networks = [selected_network]
 
         for network in networks:
             if network == "Мужской Клуб":
@@ -1121,21 +1121,27 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
+            # Обработка города
             target_city = ns_city_substitution.get(city, city) if network == "НС" else city
 
             if target_city not in chat_dict:
+                bot.send_message(message.chat.id, f"❌ Город «{target_city}» не найден в сети «{network}».")
                 continue
 
             if not check_daily_limit(user_id, network, target_city):
+                bot.send_message(message.chat.id, f"⚠️ Превышен лимит публикаций (3 в сутки) для «{network}», {target_city}.")
                 continue
 
+            # Формируем текст объявления с подписью
             signature = network_signatures.get(network, "")
             full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
+            # Публикуем
             chat_id = chat_dict[target_city]
             sent_message = publish_post(chat_id, full_text, user_name, user_id, media_type, file_id)
 
             if sent_message:
+                # Сохраняем в user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
@@ -1146,32 +1152,30 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "network": network
                 })
 
-                update_daily_posts(user_id, network, target_city)
+                # Обновляем статистику
+                update_daily_posts(user_id, network, city)
                 if user_id not in user_statistics:
                     user_statistics[user_id] = {"count": 0}
                 user_statistics[user_id]["count"] += 1
-
                 save_data()
 
-                # ВОЗВРАЩАЕМ ОТБИВКУ
-                try:
-                    bot.send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
-                except Exception as e:
-                    print(f"[ERROR] Ошибка при отправке отбивки: {e}")
+                # Отбивка пользователю
+                bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {target_city}.")
 
         ask_for_new_post(message)
 
     else:
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton(
-            "Купить рекламу",
-            url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
-        ))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.", reply_markup=markup)
+        if selected_network == "Мужской Клуб":
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
+        else:
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+
+        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Моя статистика", "Удалить объявление", "Удалить все объявления")
+    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
 
 def handle_new_post_choice(message):
