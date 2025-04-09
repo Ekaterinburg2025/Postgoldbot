@@ -1055,13 +1055,13 @@ def confirm_text(message, text, media_type=None, file_id=None):
 
 def handle_confirmation(message, text, media_type, file_id):
     if message.text.lower() == "да":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
     elif message.text.lower() == "нет":
         bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
         bot.register_next_step_handler(message, process_text)
     else:
-        bot.send_message(message.chat.id, " Неверный ответ. Выберите 'Да' или 'Нет'.")
+        bot.send_message(message.chat.id, "❌ Неверный ответ. Выберите 'Да' или 'Нет'.")
         bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
 
 def select_network(message, text, media_type, file_id):
@@ -1280,6 +1280,31 @@ def process_delete_all_choice(message):
         bot.send_message(message.chat.id, "✅ Все ваши объявления успешно удалены.", reply_markup=get_main_keyboard())
     else:
         bot.send_message(message.chat.id, "Удаление отменено.", reply_markup=get_main_keyboard())
+
+def process_text(message):
+    if message.text == "Назад":
+        bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
+        return
+
+    if message.photo or message.video:
+        if message.photo:
+            media_type = "photo"
+            file_id = message.photo[-1].file_id
+            text = message.caption if message.caption else ""
+        elif message.video:
+            media_type = "video"
+            file_id = message.video.file_id
+            text = message.caption if message.caption else ""
+    elif message.text:
+        media_type = None
+        file_id = None
+        text = message.text
+    else:
+        bot.send_message(message.chat.id, "❌ Ошибка! Отправьте текст, фото или видео.")
+        bot.register_next_step_handler(message, process_text)
+        return
+
+    confirm_text(message, text, media_type, file_id)
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
