@@ -1092,13 +1092,13 @@ def select_network(message, text, media_type, file_id):
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     city = message.text
     if city == "Выбрать другую сеть":
-        bot.send_message(message.chat.id, " Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.send_message(message.chat.id, "Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
@@ -1121,7 +1121,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
-            # Заменим город для НС
             target_city = ns_city_substitution.get(city, city) if network == "НС" else city
 
             if target_city not in chat_dict:
@@ -1132,11 +1131,18 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"⚠️ Превышен лимит публикаций (3 в сутки) для «{network}», {target_city}.")
                 continue
 
+            # Подпись сети
+            signature = network_signatures.get(network, "")
+
+            # Формируем текст объявления
+            full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
+            # Публикуем
             chat_id = chat_dict[target_city]
-            sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id, network)
+            sent_message = publish_post(chat_id, full_text, user_name, user_id, media_type, file_id)
 
             if sent_message:
-                # Сохраняем публикацию
+                # Сохраняем для удаления
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
@@ -1147,15 +1153,16 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "network": network
                 })
 
+                # Обновляем лимиты и статистику
                 update_daily_posts(user_id, network, city)
-
                 if user_id not in user_statistics:
                     user_statistics[user_id] = {"count": 0}
                 user_statistics[user_id]["count"] += 1
 
                 save_data()
 
-                bot.send_message(user_id, f"✅ Объявление опубликовано в «{network}», городе {target_city}.")
+                # Отбивка пользователю
+                bot.send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
 
         ask_for_new_post(message)
 
@@ -1170,6 +1177,23 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             message.chat.id,
             "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
             reply_markup=markup
+        )
+
+def ask_for_new_post(message):
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    markup.add("Да", "Нет")
+    bot.send_message(message.chat.id, "📨 Хотите опубликовать ещё одно объявление?", reply_markup=markup)
+    bot.register_next_step_handler(message, handle_new_post_choice)
+
+def handle_new_post_choice(message):
+    if message.text.lower() == "да":
+        bot.send_message(message.chat.id, "✍️ Напишите текст объявления:")
+        bot.register_next_step_handler(message, process_text)
+    else:
+        bot.send_message(
+            message.chat.id,
+            "Спасибо за использование бота!\nВы можете начать заново в любой момент.",
+            reply_markup=get_main_keyboard()
         )
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
