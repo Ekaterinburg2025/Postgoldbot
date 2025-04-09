@@ -1007,12 +1007,7 @@ user_state = {}
 
 @bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
 def create_new_post(message):
-    if message.chat.type != "private":
-        bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
-        return
-
-    # Запрашиваем текст объявления
-    bot.send_message(message.chat.id, "Напишите текст объявления:")
+    bot.send_message(message.chat.id, "✍️ Напишите текст объявления:", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(message, process_text)
 
 def process_text(message):
@@ -1199,30 +1194,19 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("✅ Да", "❌ Нет")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Создать новое объявление", "Моя статистика", "Удалить объявление", "Удалить все объявления")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_new_post_choice)
 
 @bot.message_handler(func=lambda message: message.text in ["✅ Да", "❌ Нет"])
 def handle_new_post_choice(message):
-    if message.text == "✅ Да":
-        bot.send_message(message.chat.id, "✍️ Напишите текст объявления:", reply_markup=types.ReplyKeyboardRemove())
-        bot.register_next_step_handler(message, process_text)
-    elif message.text == "❌ Нет":
-        bot.send_message(
-            message.chat.id,
-            "Спасибо за использование бота! 🙌\nВы можете создать новое объявление в любой момент.",
-            reply_markup=get_main_keyboard()
-        )
+    if message.text == "✅ Да" or message.text == "Создать новое объявление":
+        create_new_post(message)
     else:
-        bot.send_message(message.chat.id, "Пожалуйста, используйте кнопки ниже:", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "Спасибо за использование бота! 🙌", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
 def handle_delete_post(message):
-    if message.chat.type != "private":
-        bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
-        return
     user_id = message.chat.id
     if user_id in user_posts and user_posts[user_id]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
@@ -1238,9 +1222,6 @@ def handle_delete_post(message):
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def handle_delete_all_posts(message):
-    if message.chat.type != "private":
-        bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
-        return
     user_id = message.chat.id
     if user_id in user_posts and user_posts[user_id]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
