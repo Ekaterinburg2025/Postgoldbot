@@ -50,6 +50,21 @@ def safe_send_message(chat_id, text, **kwargs):
         print(f"[Ошибка отправки сообщения] chat_id={chat_id} — {e}")
         return None
 
+def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None):
+    try:
+        footer = f"\n\n🧾 Отправитель: {user_name} (ID: {user_id})"
+        full_text = text + footer if text else footer
+
+        if media_type == "photo":
+            return bot.send_photo(chat_id, file_id, caption=full_text)
+        elif media_type == "video":
+            return bot.send_video(chat_id, file_id, caption=full_text)
+        else:
+            return bot.send_message(chat_id, full_text)
+    except Exception as e:
+        print(f"[ERROR] Не удалось опубликовать сообщение в {chat_id}: {e}")
+        return None
+
 # URL вебхука
 WEBHOOK_URL = "https://postgoldbot.onrender.com/webhook"
 
