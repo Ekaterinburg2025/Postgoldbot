@@ -1138,7 +1138,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         else:
             networks = [selected_network]
 
-        published = False  # Флаг успешной публикации
+        published = False
 
         for network in networks:
             if network == "Мужской Клуб":
@@ -1155,19 +1155,16 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 city = ns_city_substitution[city]
 
             if city not in chat_dict:
-                bot.send_message(message.chat.id, f"❌ Ошибка! Город '{original_city}' не найден в сети «{network}».")
                 continue
 
             chat_id = chat_dict[city]
 
             if not check_daily_limit(user_id, network, city):
-                bot.send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
                 continue
 
-            # Публикация
             try:
-                signature = network_signatures.get(network, "")  # Получаем подпись для сети
-                full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"  # Добавляем подпись
+                signature = network_signatures.get(network, "")
+                full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
                 if media_type == "photo":
                     sent_message = bot.send_photo(chat_id, file_id, caption=full_text)
@@ -1178,9 +1175,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
-                    # Обновление статистики
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
                     update_daily_posts(user_id, network, city)
-                    # Сохранение данных о публикации
                     if user_id not in user_posts:
                         user_posts[user_id] = []
                     user_posts[user_id].append({
@@ -1191,12 +1187,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                         "network": network
                     })
                     save_data()
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+
             except Exception as e:
-                bot.send_message(ADMIN_CHAT_ID, f"[ERROR] Ошибка при публикации в {network}/{city}: {e}")
+                print(f"[ERROR] Ошибка при публикации: {e}")
 
         if published:
-            # Предложение создать новое объявление
             ask_for_new_post(message)
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
@@ -1206,8 +1201,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
         else:
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
-
+        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
@@ -1215,13 +1209,12 @@ def ask_for_new_post(message):
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_decision)
 
-
 def handle_new_post_decision(message):
     if message.text == "✅ Да":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
         bot.register_next_step_handler(message, process_text)
     elif message.text == "❌ Нет":
-        bot.send_message(message.chat.id, "С возвращением!", reply_markup=get_main_menu_markup())
+        bot.send_message(message.chat.id, "Спасибо за использование бота!\nВы можете начать заново в любой момент.", reply_markup=get_main_menu_markup())
     else:
         bot.send_message(message.chat.id, "Используйте кнопки ниже:", reply_markup=get_main_menu_markup())
 
