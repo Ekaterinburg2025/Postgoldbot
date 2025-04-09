@@ -1178,8 +1178,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
-                    # Отправить отбивку сразу после успешной публикации
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")  # Отбивка
                     # Обновление статистики
                     update_daily_posts(user_id, network, city)
                     # Сохранение данных о публикации
@@ -1193,10 +1191,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                         "network": network
                     })
                     save_data()
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             except Exception as e:
                 bot.send_message(ADMIN_CHAT_ID, f"[ERROR] Ошибка при публикации в {network}/{city}: {e}")
 
         if published:
+            # Предложение создать новое объявление
             ask_for_new_post(message)
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
@@ -1208,18 +1208,20 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
+
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_decision)
 
+
 def handle_new_post_decision(message):
     if message.text == "✅ Да":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
         bot.register_next_step_handler(message, process_text)
     elif message.text == "❌ Нет":
-        bot.send_message(message.chat.id, "Спасибо за использование бота!\nВы можете начать заново в любой момент.", reply_markup=get_main_menu_markup())
+        bot.send_message(message.chat.id, "С возвращением!", reply_markup=get_main_menu_markup())
     else:
         bot.send_message(message.chat.id, "Используйте кнопки ниже:", reply_markup=get_main_menu_markup())
 
