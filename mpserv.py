@@ -1178,6 +1178,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
+                    # Отправить отбивку сразу после успешной публикации
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")  # Отбивка
                     # Обновление статистики
                     update_daily_posts(user_id, network, city)
                     # Сохранение данных о публикации
@@ -1191,13 +1193,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                         "network": network
                     })
                     save_data()
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-
             except Exception as e:
                 bot.send_message(ADMIN_CHAT_ID, f"[ERROR] Ошибка при публикации в {network}/{city}: {e}")
 
         if published:
-            ask_for_new_post(message)  # Предложить новую публикацию
+            ask_for_new_post(message)
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
     else:
