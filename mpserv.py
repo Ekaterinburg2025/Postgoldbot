@@ -1174,11 +1174,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
 
-    if selected_network == "Все сети":
-        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
-    else:
-        networks = [selected_network]
-
 def select_network(message, text, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
@@ -1211,6 +1206,7 @@ def select_network(message, text, media_type, file_id):
     else:
         bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильную сеть.")
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+
 
     any_success = False  # Флаг успешной публикации
 
