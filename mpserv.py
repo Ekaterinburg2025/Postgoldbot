@@ -990,18 +990,6 @@ user_state = {}
 @bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
 def create_new_post(message):
     if message.chat.type != "private":
-        bot.send_message(message.chat.id, "Пожалуйста, используйте бот в ЛС.")
-        return
-
-    bot.send_message(message.chat.id, "✍️ Напишите текст объявления (или отправьте фото/видео с подписью):")
-    user_state[message.chat.id] = {
-        "step": "awaiting_content",
-        "data": {}
-    }
-
-@bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
-def create_new_post(message):
-    if message.chat.type != "private":
         bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
         return
 
