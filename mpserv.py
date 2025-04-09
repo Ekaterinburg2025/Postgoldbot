@@ -1154,10 +1154,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             if network == "НС" and city in ns_city_substitution:
                 city = ns_city_substitution[city]
 
-            if city not in chat_dict:{
+            if city not in chat_dict:
                 bot.send_message(message.chat.id, f"❌ Ошибка! Город '{original_city}' не найден в сети «{network}».")
                 continue
-            }
 
             chat_id = chat_dict[city]
 
