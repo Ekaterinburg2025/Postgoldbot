@@ -1178,6 +1178,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
+                    # Обновление статистики
+                    update_daily_posts(user_id, network, city)
                     # Сохранение данных о публикации
                     if user_id not in user_posts:
                         user_posts[user_id] = []
@@ -1207,7 +1209,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления")
+    markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
 
 def handle_new_post_choice(message):
