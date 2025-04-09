@@ -1188,6 +1188,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         if published:
             ask_for_new_post(message)
+            if user_id in user_state:
+                del user_state[user_id]
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
     else:
@@ -1200,8 +1202,6 @@ def ask_for_new_post(message):
     markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
-if user_id in user_state:
-    del user_state[user_id]
 
 @bot.message_handler(func=lambda message: message.text in ["✅ Да", "❌ Нет"])
 def step_after_post(message):
