@@ -1133,11 +1133,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_name = get_user_name(message.from_user)
 
     if is_user_paid(user_id, selected_network, city):
-        if selected_network == "Все сети":
-            networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
-        else:
-            networks = [selected_network]
-
+        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
         published = False
 
         for network in networks:
@@ -1150,16 +1146,14 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
-            original_city = city
-            if network == "НС" and city in ns_city_substitution:
-                city = ns_city_substitution[city]
+            target_city = ns_city_substitution.get(city, city) if network == "НС" else city
 
-            if city not in chat_dict:
+            if target_city not in chat_dict:
                 continue
 
-            chat_id = chat_dict[city]
+            chat_id = chat_dict[target_city]
 
-            if not check_daily_limit(user_id, network, city):
+            if not check_daily_limit(user_id, network, target_city):
                 continue
 
             try:
@@ -1175,15 +1169,15 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-                    update_daily_posts(user_id, network, city)
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {target_city}.")
+                    update_daily_posts(user_id, network, target_city)
                     if user_id not in user_posts:
                         user_posts[user_id] = []
                     user_posts[user_id].append({
                         "message_id": sent_message.message_id,
                         "chat_id": chat_id,
                         "time": datetime.now(),
-                        "city": city,
+                        "city": target_city,
                         "network": network
                     })
                     save_data()
@@ -1197,89 +1191,91 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
     else:
         markup = types.InlineKeyboardMarkup()
-        if selected_network == "Мужской Клуб":
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
-        else:
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+        markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да", "Нет")
-    bot.send_message(message.chat.id, "Хотите опубликовать ещё одно объявление?", reply_markup=markup)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("✅ Да", "❌ Нет")
+    bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
 
 def handle_new_post_choice(message):
-    if message.text.lower() == "да":
+    if message.text == "✅ Да":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
         bot.register_next_step_handler(message, process_text)
+    elif message.text == "❌ Нет":
+        bot.send_message(message.chat.id, "Спасибо за использование бота! 🙌", reply_markup=get_main_keyboard())
     else:
-        bot.send_message(
-            message.chat.id,
-            "Спасибо за использование бота! 🙌\nЕсли хотите создать новое объявление, нажмите кнопку ниже.",
-            reply_markup=get_main_keyboard()
-        )
+        bot.send_message(message.chat.id, "Пожалуйста, используйте кнопки ниже ⬇️", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
 def handle_delete_post(message):
     if message.chat.type != "private":
         bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
         return
-    if message.chat.id in user_posts and user_posts[message.chat.id]:
+    user_id = message.chat.id
+    if user_id in user_posts and user_posts[user_id]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        for post in user_posts[message.chat.id]:
+        for post in user_posts[user_id]:
             time_formatted = format_time(post["time"])
             button_text = f"Удалить: {time_formatted}, {post['city']}, {post['network']}"
             markup.add(button_text)
         markup.add("Отмена")
-        bot.send_message(message.chat.id, "Выберите объявление для удаления:", reply_markup=markup)
+        bot.send_message(user_id, "Выберите объявление для удаления:", reply_markup=markup)
         bot.register_next_step_handler(message, process_delete_choice)
     else:
-        bot.send_message(message.chat.id, "❌ У вас нет опубликованных объявлений.")
+        bot.send_message(user_id, "❌ У вас нет опубликованных объявлений.")
 
 @bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
 def handle_delete_all_posts(message):
     if message.chat.type != "private":
         bot.send_message(message.chat.id, "Пожалуйста, используйте ЛС для работы с ботом.")
         return
-    if message.chat.id in user_posts and user_posts[message.chat.id]:
+    user_id = message.chat.id
+    if user_id in user_posts and user_posts[user_id]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
         markup.add("Да, удалить всё", "Нет, отменить")
-        bot.send_message(message.chat.id, "Вы уверены, что хотите удалить все свои объявления?", reply_markup=markup)
+        bot.send_message(user_id, "Вы уверены, что хотите удалить все свои объявления?", reply_markup=markup)
         bot.register_next_step_handler(message, process_delete_all_choice)
     else:
-        bot.send_message(message.chat.id, "❌ У вас нет опубликованных объявлений.")
+        bot.send_message(user_id, "❌ У вас нет опубликованных объявлений.")
 
 def process_delete_choice(message):
+    user_id = message.chat.id
     if message.text == "Отмена":
-        bot.send_message(message.chat.id, "Удаление отменено.", reply_markup=get_main_keyboard())
+        bot.send_message(user_id, "Удаление отменено.", reply_markup=get_main_keyboard())
     else:
         try:
-            for post in user_posts[message.chat.id]:
+            for post in list(user_posts[user_id]):
                 time_formatted = format_time(post["time"])
-                if message.text == f"Удалить: {time_formatted}, {post['city']}, {post['network']}":
+                button_text = f"Удалить: {time_formatted}, {post['city']}, {post['network']}"
+                if message.text == button_text:
                     try:
                         bot.delete_message(post["chat_id"], post["message_id"])
                     except Exception:
                         pass
-                    user_posts[message.chat.id].remove(post)
-                    bot.send_message(message.chat.id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
+                    user_posts[user_id].remove(post)
+                    save_data()
+                    bot.send_message(user_id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
                     return
-            bot.send_message(message.chat.id, "❌ Объявление не найдено.")
-        except (ValueError, IndexError):
-            bot.send_message(message.chat.id, "❌ Ошибка! Пожалуйста, выберите объявление из списка.")
+            bot.send_message(user_id, "❌ Объявление не найдено.")
+        except Exception as e:
+            bot.send_message(user_id, f"❌ Ошибка! {e}")
 
 def process_delete_all_choice(message):
+    user_id = message.chat.id
     if message.text == "Да, удалить всё":
-        for post in user_posts[message.chat.id]:
+        for post in list(user_posts[user_id]):
             try:
                 bot.delete_message(post["chat_id"], post["message_id"])
             except Exception:
                 pass
-        user_posts[message.chat.id] = []
-        bot.send_message(message.chat.id, "✅ Все ваши объявления успешно удалены.", reply_markup=get_main_keyboard())
+        user_posts[user_id] = []
+        save_data()
+        bot.send_message(user_id, "✅ Все ваши объявления успешно удалены.", reply_markup=get_main_keyboard())
     else:
-        bot.send_message(message.chat.id, "Удаление отменено.", reply_markup=get_main_keyboard())
+        bot.send_message(user_id, "Удаление отменено.", reply_markup=get_main_keyboard())
 
 def process_text(message):
     if message.text == "Назад":
