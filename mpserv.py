@@ -1083,13 +1083,23 @@ def handle_all_messages(message):
         file_id = data["file_id"]
         selected_network = data["network"]
 
-        # Обработка публикации
+        if selected_city == "Назад":
+            bot.send_message(message.chat.id, "📡 Выберите сеть:", reply_markup=get_network_markup())
+            state["step"] = "choose_network"
+            return
+
+        if selected_city == "Выбрать другую сеть":
+            bot.send_message(message.chat.id, "📡 Выберите сеть:", reply_markup=get_network_markup())
+            state["step"] = "choose_network"
+            return
+
         if selected_network == "Все сети":
             networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
         else:
             networks = [selected_network]
 
-        published = False
+        any_success = False
+
         for network in networks:
             if network == "Мужской Клуб":
                 chat_dict = chat_ids_mk
@@ -1100,30 +1110,48 @@ def handle_all_messages(message):
             else:
                 continue
 
-            city_to_use = ns_city_substitution.get(selected_city, selected_city) if network == "НС" else selected_city
+            target_city = ns_city_substitution.get(selected_city, selected_city) if network == "НС" else selected_city
 
-            if city_to_use not in chat_dict:
-                safe_send_message(message.chat.id, f"⛔ Город «{selected_city}» не найден в сети «{network}».")
+            if target_city not in chat_dict:
+                safe_send_message(message.chat.id, f"❌ Город '{target_city}' не найден в сети «{network}».")
                 continue
 
-            chat_id = chat_dict[city_to_use]
+            if not is_user_paid(user_id, network, selected_city):
+                continue  # просто не публикуем, но не ломаем поток
 
-            if not is_user_paid(user_id, network, city_to_use):
+            if not check_daily_limit(user_id, network, target_city):
+                safe_send_message(message.chat.id, f"⚠️ Превышен лимит 3 объявлений в сутки в «{network}», город {target_city}.")
                 continue
 
-            if not check_daily_limit(user_id, network, city_to_use):
-                safe_send_message(message.chat.id, f"⚠️ Лимит 3 объявлений в сутки в «{network}», {city_to_use}.")
-                continue
-
+            chat_id = chat_dict[target_city]
             msg = publish_post(chat_id, text, user_name, user_id, media_type, file_id)
             if msg:
-                safe_send_message(user_id, f"✅ Объявление опубликовано в «{network}», {city_to_use}.")
-                published = True
+                # Сохраняем пост
+                if message.chat.id not in user_posts:
+                    user_posts[message.chat.id] = []
+                user_posts[message.chat.id].append({
+                    "message_id": msg.message_id,
+                    "chat_id": chat_id,
+                    "time": datetime.now(),
+                    "city": selected_city,
+                    "network": network
+                })
+                update_daily_posts(user_id, network, selected_city)
+                if user_id not in user_statistics:
+                    user_statistics[user_id] = {"count": 0}
+                user_statistics[user_id]["count"] += 1
+                save_data()
 
-        if not published:
+                safe_send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
+                any_success = True
+
+        if not any_success:
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
-            safe_send_message(message.chat.id, "🚫 Нет доступа к публикации. Обратитесь к администратору.", reply_markup=markup)
+            if selected_network == "Мужской Клуб":
+                markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
+            else:
+                markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+            safe_send_message(message.chat.id, "⛔ У вас нет прав на публикацию в выбранной сети/городе.", reply_markup=markup)
 
         ask_for_new_post(message)
         user_state.pop(message.chat.id, None)
