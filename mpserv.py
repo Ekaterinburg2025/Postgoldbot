@@ -142,12 +142,13 @@ def load_data():
                     if user_id not in user_posts:
                         user_posts[user_id] = []
                     user_posts[user_id].append({
-                        "network": network,
-                        "city": city,
-                        "time": time,
+                        "message_id": sent_message.message_id,
                         "chat_id": chat_id,
-                        "message_id": message_id
-                    })
+                        "time": datetime.now(),
+                        "city": target_city,
+                        "network": network
+})
+
 
                 return paid_users, admin_users, user_posts  # Возвращаем данные
 
@@ -1195,19 +1196,24 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
+if user_id in user_state:
+    del user_state[user_id]
 
+@bot.message_handler(func=lambda message: message.text in ["✅ Да", "❌ Нет"])
+def step_after_post(message):
+    handle_new_post_choice(message)
 def handle_new_post_choice(message):
     if message.text == "✅ Да":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
+        bot.send_message(message.chat.id, "✍️ Напишите текст объявления:", reply_markup=types.ReplyKeyboardRemove())
         bot.register_next_step_handler(message, process_text)
     elif message.text == "❌ Нет":
         bot.send_message(message.chat.id, "Спасибо за использование бота! 🙌", reply_markup=get_main_keyboard())
     else:
-        bot.send_message(message.chat.id, "Пожалуйста, используйте кнопки ниже ⬇️", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "Пожалуйста, используйте кнопки ниже:", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
 def handle_delete_post(message):
@@ -1320,6 +1326,12 @@ def handle_stats_button(message):
     except Exception as e:
         print(f"[ERROR] Ошибка при показе статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
+
+@bot.message_handler(content_types=["text", "photo", "video"])
+def handle_all_messages(message):
+    state = user_state.get(message.chat.id)
+    if not state:
+        return  # Нет активного шага — игнорируем
 
 # Добавляем маршрут для проверки работоспособности сервиса (если зайти по корневому URL)
 @app.route('/')
