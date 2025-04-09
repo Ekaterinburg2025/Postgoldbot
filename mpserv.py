@@ -1205,18 +1205,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("✅ Да", "❌ Нет")
+    markup.add("Создать новое объявление", "Моя статистика", "Удалить объявление", "Удалить все объявления")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_new_post_decision)
-
-def handle_new_post_decision(message):
-    if message.text == "✅ Да":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
-        bot.register_next_step_handler(message, process_text)
-    elif message.text == "❌ Нет":
-        bot.send_message(message.chat.id, "Спасибо за использование бота!\nВы можете начать заново в любой момент.", reply_markup=get_main_menu_markup())
-    else:
-        bot.send_message(message.chat.id, "Используйте кнопки ниже:", reply_markup=get_main_menu_markup())
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
 def handle_delete_post(message):
