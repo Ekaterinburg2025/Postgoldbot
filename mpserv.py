@@ -1289,17 +1289,6 @@ def process_text(message):
 
     confirm_text(message, text, media_type, file_id)
 
-@bot.message_handler(content_types=["text", "photo", "video"])
-def handle_all_messages(message):
-    user_id = message.from_user.id
-    state = user_state.get(user_id)
-
-    if state == "awaiting_new_post_choice":
-        handle_new_post_choice(message)
-    elif state == "awaiting_text":
-        user_state.pop(user_id, None)
-        process_text(message)
-
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
     try:
@@ -1318,6 +1307,17 @@ def handle_stats_button(message):
     except Exception as e:
         print(f"[ERROR] Ошибка при показе статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
+
+@bot.message_handler(content_types=["text", "photo", "video"])
+def handle_all_messages(message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+
+    if state == "awaiting_new_post_choice":
+        handle_new_post_choice(message)
+    elif state == "awaiting_text":
+        user_state.pop(user_id, None)
+        process_text(message)
 
 # Добавляем маршрут для проверки работоспособности сервиса (если зайти по корневому URL)
 @app.route('/')
