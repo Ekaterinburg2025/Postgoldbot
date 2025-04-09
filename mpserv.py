@@ -1148,12 +1148,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 continue
 
             target_city = ns_city_substitution.get(city, city) if network == "НС" else city
-
             if target_city not in chat_dict:
                 continue
 
             chat_id = chat_dict[target_city]
-
             if not check_daily_limit(user_id, network, target_city):
                 continue
 
@@ -1172,7 +1170,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     published = True
                     bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {target_city}.")
 
-                    # Обновление статистики и лимитов
                     update_daily_posts(user_id, network, target_city)
 
                     if user_id not in user_posts:
@@ -1193,13 +1190,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         if published:
             ask_for_new_post(message)
-            if user_id in user_state:
-                del user_state[user_id]
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
     else:
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
+        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
 
 def ask_for_new_post(message):
