@@ -50,9 +50,11 @@ def safe_send_message(chat_id, text, **kwargs):
         print(f"[Ошибка отправки сообщения] chat_id={chat_id} — {e}")
         return None
 
-def publish_post(chat_id, text, user_name, user_id, media_type=None, file_id=None, network=None):
+def publish_post(chat_id, text, user_name, user_id, network=None, media_type=None, file_id=None):
     try:
         signature = network_signatures.get(network, "")
+        top = f"📢 Объявление от {user_name}:\n\n{text}" if text else f"📢 Объявление от {user_name}"
+        full_text = top + ("\n\n" + signature if signature else "")
 
         if media_type == "photo":
             return bot.send_photo(chat_id, file_id, caption=full_text)
