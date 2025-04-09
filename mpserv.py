@@ -1038,7 +1038,6 @@ def handle_all_messages(message):
         })
 
         preview = f"📝 Ваш текст:\n{text}\n\nОпубликовать?"
-
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("✅ Да", "✏️ Изменить", "❌ Отмена")
 
@@ -1069,26 +1068,25 @@ def handle_all_messages(message):
         else:
             bot.send_message(message.chat.id, "Пожалуйста, выберите: ✅ Да, ✏️ Изменить или ❌ Отмена.")
 
-# === ШАГ 3: Выбор сети ===
-elif step == "choose_network":
-    selected_network = message.text.strip()  # ← убираем пробелы и переносы
-    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
+    # === ШАГ 3: Выбор сети ===
+    elif step == "choose_network":
+        selected_network = message.text.strip()
+        valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
 
-    if selected_network not in valid_networks:
-        bot.send_message(message.chat.id, "⛔ Неверная сеть. Пожалуйста, выберите из списка.")
-        return
+        if selected_network not in valid_networks:
+            bot.send_message(message.chat.id, "⛔ Неверная сеть. Пожалуйста, выберите из списка.")
+            return
 
-    data["network"] = selected_network
-    markup = get_city_markup(selected_network)
-    bot.send_message(message.chat.id, "🏙️ Выберите город:", reply_markup=markup)
-    state["step"] = "choose_city"
+        data["network"] = selected_network
+        markup = get_city_markup(selected_network)
+        bot.send_message(message.chat.id, "🏙️ Выберите город:", reply_markup=markup)
+        state["step"] = "choose_city"
 
     # === ШАГ 4: Выбор города и публикация ===
     elif step == "choose_city":
         selected_city = message.text
         selected_network = data.get("network")
 
-        # Назад — вернуться к выбору сети
         if selected_city in ["Назад", "Выбрать другую сеть"]:
             markup = get_network_markup()
             bot.send_message(message.chat.id, "📡 Выберите сеть:", reply_markup=markup)
@@ -1106,7 +1104,6 @@ elif step == "choose_network":
         media_type = data["media_type"]
         file_id = data["file_id"]
 
-        # Определяем сети
         networks = (
             ["Мужской Клуб", "ПАРНИ 18+", "НС"]
             if selected_network == "Все сети" else [selected_network]
