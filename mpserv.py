@@ -1132,7 +1132,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
 
-    # Проверка оплаты
     if is_user_paid(user_id, selected_network, city):
         if selected_network == "Все сети":
             networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"]
@@ -1161,7 +1160,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
             chat_id = chat_dict[city]
 
-            # Проверка лимита публикаций
             if not check_daily_limit(user_id, network, city):
                 bot.send_message(message.chat.id, f"⚠️ Вы превысили лимит публикаций (3 в сутки) для сети «{network}», города {city}. Попробуйте завтра.")
                 continue
@@ -1169,7 +1167,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             # Публикация
             try:
                 signature = network_signatures.get(network, "")  # Получаем подпись для сети
-                full_text = f"{text}\n\n{signature}"  # Добавляем подпись к тексту
+                full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"  # Добавляем подпись
 
                 if media_type == "photo":
                     sent_message = bot.send_photo(chat_id, file_id, caption=full_text)
@@ -1180,8 +1178,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
-                    # Обновление статистики
-                    update_daily_posts(user_id, network, city)
                     # Сохранение данных о публикации
                     if user_id not in user_posts:
                         user_posts[user_id] = []
@@ -1240,35 +1236,23 @@ def delete_all_posts(message):
         bot.send_message(user_id, "У вас нет объявлений.")
 
 def handle_delete_post(message):
-    try:
-        user_id = message.chat.id
-        if user_id not in user_posts or not user_posts[user_id]:
-            bot.send_message(user_id, "У вас нет опубликованных объявлений.")
+    user_id = message.chat.id
+    if user_id not in user_posts:
+        bot.send_message(user_id, "У вас нет опубликованных объявлений.")
+        return
+
+    for post in list(user_posts[user_id]):
+        try:
+            bot.delete_message(post["chat_id"], post["message_id"])
+            user_posts[user_id].remove(post)
+            save_data()
+            bot.send_message(user_id, "✅ Объявление успешно удалено.")
             return
+        except Exception as e:
+            print(f"[ERROR] Ошибка при удалении: {e}")
+            continue
 
-        for post in list(user_posts[user_id]):
-            if f"Удалить объявление в {post['city']} ({post['network']})" == message.text:
-                try:
-                    # Попытка удалить сообщение
-                    try:
-                        bot.delete_message(post["chat_id"], post["message_id"])
-                    except Exception as e:
-                        print(f"[DEBUG] Ошибка при удалении сообщения (возможно, уже удалено): {e}")
-
-                    # Удаляем только из user_posts, но лимиты и статистику НЕ трогаем
-                    user_posts[user_id].remove(post)
-                    save_data()
-
-                    bot.send_message(user_id, "✅ Объявление успешно удалено.")
-                    return
-                except Exception as e:
-                    bot.send_message(user_id, f"⚠️ Ошибка при удалении объявления: {e}")
-                    return
-
-        bot.send_message(user_id, "Объявление не найдено.")
-    except Exception as e:
-        print(f"[ERROR] Ошибка при обработке удаления: {e}")
-        bot.send_message(user_id, f"❌ Ошибка при удалении объявления: {e}")
+    bot.send_message(user_id, "Объявление не найдено.")
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
