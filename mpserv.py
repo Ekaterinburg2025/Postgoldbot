@@ -1178,8 +1178,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 if sent_message:
                     published = True
-                    # Отправить отбивку сразу после успешной публикации
-                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")  # Отбивка
                     # Обновление статистики
                     update_daily_posts(user_id, network, city)
                     # Сохранение данных о публикации
@@ -1193,11 +1191,13 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                         "network": network
                     })
                     save_data()
+                    bot.send_message(user_id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+
             except Exception as e:
                 bot.send_message(ADMIN_CHAT_ID, f"[ERROR] Ошибка при публикации в {network}/{city}: {e}")
 
         if published:
-            ask_for_new_post(message)
+            ask_for_new_post(message)  # Предложить новую публикацию
         else:
             bot.send_message(user_id, "❌ Не удалось опубликовать объявление ни в одной сети.")
     else:
@@ -1209,53 +1209,56 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
 def ask_for_new_post(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("✅ Да", "❌ Нет")
     bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
+    bot.register_next_step_handler(message, handle_new_post_decision)
 
-def handle_new_post_choice(message):
-    if message.text.lower() == "да":
-        bot.send_message(message.chat.id, "✍️ Напишите текст объявления:")
+def handle_new_post_decision(message):
+    if message.text == "✅ Да":
+        bot.send_message(message.chat.id, "Напишите текст объявления:")
         bot.register_next_step_handler(message, process_text)
+    elif message.text == "❌ Нет":
+        bot.send_message(message.chat.id, "Спасибо за использование бота!\nВы можете начать заново в любой момент.", reply_markup=get_main_menu_markup())
     else:
-        bot.send_message(
-            message.chat.id,
-            "Спасибо за использование бота!\nВы можете начать заново в любой момент.",
-            reply_markup=get_main_keyboard()
-        )
+        bot.send_message(message.chat.id, "Используйте кнопки ниже:", reply_markup=get_main_menu_markup())
 
 @bot.message_handler(func=lambda message: message.text == "Удалить объявление")
-def delete_post_entry_point(message):
-    handle_delete_post(message)
-
-@bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
-def delete_all_posts(message):
-    user_id = message.chat.id
-    if user_id in user_posts:
-        user_posts[user_id] = []
-        save_data()
-        bot.send_message(user_id, "✅ Все ваши объявления удалены.")
-    else:
-        bot.send_message(user_id, "У вас нет объявлений.")
-
 def handle_delete_post(message):
     user_id = message.chat.id
-    if user_id not in user_posts:
+    if user_id not in user_posts or not user_posts[user_id]:
         bot.send_message(user_id, "У вас нет опубликованных объявлений.")
         return
 
+    post = user_posts[user_id][-1]  # Берём последнее опубликованное объявление
+
+    try:
+        bot.delete_message(post["chat_id"], post["message_id"])
+        user_posts[user_id].pop()  # Удаляем объявление из списка
+        save_data()
+        bot.send_message(user_id, "✅ Объявление успешно удалено.")
+    except Exception as e:
+        bot.send_message(user_id, "❌ Не удалось удалить объявление.")
+        print(f"[ERROR] Ошибка при удалении: {e}")
+
+@bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
+def handle_delete_all_posts(message):
+    user_id = message.chat.id
+    if user_id not in user_posts or not user_posts[user_id]:
+        bot.send_message(user_id, "У вас нет опубликованных объявлений.")
+        return
+
+    deleted = 0
     for post in list(user_posts[user_id]):
         try:
             bot.delete_message(post["chat_id"], post["message_id"])
-            user_posts[user_id].remove(post)
-            save_data()
-            bot.send_message(user_id, "✅ Объявление успешно удалено.")
-            return
+            deleted += 1
         except Exception as e:
-            print(f"[ERROR] Ошибка при удалении: {e}")
-            continue
+            print(f"[ERROR] Ошибка при удалении объявления: {e}")
 
-    bot.send_message(user_id, "Объявление не найдено.")
+    user_posts[user_id] = []  # Очищаем список объявлений
+    save_data()
+    bot.send_message(user_id, f"✅ Удалено {deleted} объявлений.")
 
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
