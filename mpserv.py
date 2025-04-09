@@ -1121,7 +1121,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
-            # Заменяем название города для НС
             target_city = ns_city_substitution.get(city, city) if network == "НС" else city
 
             if target_city not in chat_dict:
@@ -1132,8 +1131,15 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"⚠️ Превышен лимит публикаций (3 в сутки) для «{network}», {target_city}.")
                 continue
 
+            # Подпись сети
+            signature = network_signatures.get(network, "")
+
+            # Формируем текст объявления
+            full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
+            # Публикуем
             chat_id = chat_dict[target_city]
-            sent_message = publish_post(chat_id, text, user_name, user_id, media_type, file_id, network)
+            sent_message = publish_post(chat_id, full_text, user_name, user_id, media_type, file_id)
 
             if sent_message:
                 # Сохраняем данные для удаления
@@ -1155,15 +1161,17 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 save_data()
 
-                # Отбивка
+                # Отбивка пользователю
                 bot.send_message(user_id, f"✅ Объявление опубликовано в сети «{network}», городе {target_city}.")
 
         ask_for_new_post(message)
 
     else:
         markup = types.InlineKeyboardMarkup()
-        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
+        if selected_network == "Мужской Клуб":
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
+        else:
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
 
         bot.send_message(
             message.chat.id,
