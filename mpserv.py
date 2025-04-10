@@ -800,9 +800,9 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date_raw = paid.get("end_date")
-                            bot.send_message(chat_id, f"🛠 DEBUG → end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
                             try:
+                                end_date_raw = paid.get("end_date")
+                                bot.send_message(chat_id, f"🛠 end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
                                 if isinstance(end_date_raw, datetime):
                                     end_date = end_date_raw
                                 elif isinstance(end_date_raw, str) and "T" in end_date_raw:
@@ -1036,15 +1036,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
 
-    # Проверка лимита публикаций
-    user_stats = get_user_statistics(user_id)
-    if user_stats['remaining'] <= 0:
-        bot.send_message(message.chat.id, "⛔ Лимит публикаций на сегодня исчерпан.")
-        return
-
     # Проверка на наличие оплаты
     if is_user_paid(user_id, selected_network, city):
+        signature = network_signatures.get(selected_network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
         networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
         for network in networks:
@@ -1094,11 +1090,25 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "city": city,
                     "network": network
                 })
+
+                # ✅ Обновим user_daily_posts для статистики
+                if user_id not in user_daily_posts:
+                    user_daily_posts[user_id] = {}
+                if network not in user_daily_posts[user_id]:
+                    user_daily_posts[user_id][network] = {}
+                if city not in user_daily_posts[user_id][network]:
+                    user_daily_posts[user_id][network][city] = {
+                        "posts": [],
+                        "deleted_posts": []
+                    }
+                user_daily_posts[user_id][network][city]["posts"].append(datetime.now())
+
                 bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
 
         ask_for_new_post(message)
+
     else:
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
