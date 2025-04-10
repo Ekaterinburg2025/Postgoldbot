@@ -1163,10 +1163,65 @@ def handle_stats_button(message):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
 def handle_admin_statistics(call):
     try:
-        bot.answer_callback_query(call.id)  # чтобы Telegram не висел
+        bot.answer_callback_query(call.id)
         show_statistics_for_admin(call.message.chat.id)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_statistics: {e}")
+
+
+def show_statistics_for_admin(chat_id):
+    if not is_admin(chat_id):
+        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
+        return
+
+    stats = get_admin_statistics()
+    if not stats:
+        bot.send_message(chat_id, "Нет данных о публикациях.")
+        return
+
+    response = "📊 Статистика публикаций:\n"
+    for user_id, user_stats in stats.items():
+        user_name = f"ID {user_id}"
+
+        response += (
+            f"👤 {user_name}:\n"
+            f"• Опубликовано: {user_stats['published']}\n"
+            f"• Осталось: {user_stats['remaining']}\n"
+        )
+
+        if user_stats["details"]:
+            response += "  • Детали:\n"
+            for network, cities in user_stats["details"].items():
+                for city, data in cities.items():
+                    end_date = None
+                    for paid in paid_users.get(user_id, []):
+                        if (
+                            (paid.get("network") == network and paid.get("city") == city) or
+                            (paid.get("network") == "Все сети" and paid.get("city") == city)
+                        ):
+                            end_date = paid.get("end_date")
+                            break
+
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
+
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
+                    response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
+
+        if user_stats["links"]:
+            response += "  • Ссылки:\n"
+            for link in user_stats["links"]:
+                response += f"    - {link}\n"
+
+        response += "\n"
+
+    try:
+        bot.send_message(chat_id, response)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
