@@ -726,7 +726,6 @@ def handle_duration_change(call):
         print(f"Ошибка в handle_duration_change: {e}")
 
 def get_admin_statistics():
-    bot.send_message(ADMIN_CHAT_ID, f"[DEBUG] get_admin_statistics вызвана. Пользователей: {len(user_daily_posts)}")
     statistics = {}
 
     for user_id, networks in user_daily_posts.items():
@@ -796,9 +795,9 @@ def show_statistics_for_admin(chat_id):
                             end_date = paid.get("end_date")
                             break
 
-                    if isinstance(end_date, str):
+                    if not isinstance(end_date, datetime):
                         try:
-                            end_date = datetime.fromisoformat(end_date)
+                            end_date = datetime.fromisoformat(str(end_date))
                         except:
                             end_date = None
 
