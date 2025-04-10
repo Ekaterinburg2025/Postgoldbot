@@ -31,6 +31,95 @@ app = Flask(__name__)
 # ADMIN ID (ваш ID)
 ADMIN_CHAT_ID = 479938867  # Ваш ID
 
+# Глобальные переменные
+paid_users = {}
+user_posts = {}
+user_daily_posts = {}
+user_statistics = {}
+admins = []
+db_lock = threading.Lock()
+
+# Инициализация базы данных
+def init_db():
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS paid_users (
+                    user_id INTEGER,
+                    network TEXT,
+                    city TEXT,
+                    end_date TEXT
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS admin_users (
+                    user_id INTEGER PRIMARY KEY
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_posts (
+                    user_id INTEGER,
+                    network TEXT,
+                    city TEXT,
+                    time TEXT,
+                    chat_id INTEGER,
+                    message_id INTEGER
+                )
+            """)
+            conn.commit()
+
+# Загрузка данных из базы данных
+def load_data():
+    with db_lock:
+        try:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
+
+                # Загружаем оплативших пользователей
+                cur.execute("SELECT user_id, network, city, end_date FROM paid_users")
+                local_paid_users = {}
+                for user_id, network, city, end_date in cur.fetchall():
+                    if user_id not in local_paid_users:
+                        local_paid_users[user_id] = []
+                    local_paid_users[user_id].append({
+                        "network": network,
+                        "city": city,
+                        "end_date": datetime.fromisoformat(end_date)
+                    })
+
+                # Загружаем админов
+                cur.execute("SELECT user_id FROM admin_users")
+                local_admins = [row[0] for row in cur.fetchall()]
+
+                # Загружаем публикации
+                cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+                local_user_posts = {}
+                for user_id, network, city, time_str, chat_id, message_id in cur.fetchall():
+                    if user_id not in local_user_posts:
+                        local_user_posts[user_id] = []
+                    try:
+                        post_time = datetime.fromisoformat(time_str)
+                    except Exception:
+                        post_time = datetime.now()
+                    local_user_posts[user_id].append({
+                        "message_id": message_id,
+                        "chat_id": chat_id,
+                        "time": post_time,
+                        "city": city,
+                        "network": network
+                    })
+
+                return local_paid_users, local_admins, local_user_posts
+
+        except Exception as e:
+            print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
+            return {}, [], {}
+
+# Инициализация базы данных
+init_db()
+paid_users, admins, user_posts = load_data()
+
 # Списки chat_id для каждой сети и города
 chat_ids_mk = {
     "Екатеринбург": -1002210043742,
@@ -306,17 +395,17 @@ def check_payment(user_id, network, city):
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
     for attempt in range(retries):
-        with db_lock:  # Гарантируем одиночный доступ
+        with db_lock:
             try:
-                with sqlite3.connect("bot_data.db", timeout=5) as conn:  # timeout поможет тоже
+                with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
-                    # Очищаем таблицы
+                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # Сохраняем оплативших пользователей
+                    # Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
                             cur.execute("""
@@ -324,11 +413,11 @@ def save_data(retries=3, delay=0.5):
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
-                    # Сохраняем админов
-                    for user_id in admin_users:
+                    # Сохранение админов
+                    for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # Сохраняем публикации
+                    # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
@@ -340,20 +429,16 @@ def save_data(retries=3, delay=0.5):
                             ))
 
                     conn.commit()
-                    print("[DEBUG] Данные успешно сохранены.")
-                    return  # Успешно, выходим
+                    return
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
-                    print(f"[WARN] Попытка {attempt+1} — БД заблокирована, пробуем снова через {delay} сек...")
                     time.sleep(delay)
+                    continue
                 else:
-                    print(f"[ERROR] Ошибка при сохранении данных: {e}")
                     break
-            except Exception as e:
-                print(f"[ERROR] Ошибка при сохранении данных: {e}")
+            except Exception:
                 break
-    else:
-        print("[ERROR] Не удалось сохранить данные после нескольких попыток.")
+    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
