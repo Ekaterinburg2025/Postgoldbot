@@ -1314,6 +1314,7 @@ def handle_restore_start(message):
 def restore_data_from_json(json_data):
     try:
         data = json.loads(json_data)
+
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
@@ -1322,10 +1323,11 @@ def restore_data_from_json(json_data):
                 paid_users[int(user_id)] = []
                 for entry in entries:
                     end_date = entry.get("end_date")
-                    try:
-                        end_date = datetime.fromisoformat(end_date) if isinstance(end_date, str) else None
-                    except:
-                        end_date = None
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
                     paid_users[int(user_id)].append({
                         "network": entry["network"],
                         "city": entry["city"],
@@ -1334,13 +1336,15 @@ def restore_data_from_json(json_data):
 
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
-                user_posts[int(user_id)] = []
+                parsed_posts = []
                 for post in posts:
-                    try:
-                        post["time"] = datetime.fromisoformat(post["time"])
-                    except:
-                        post["time"] = datetime.now()
-                    user_posts[int(user_id)].append(post)
+                    if isinstance(post.get("time"), str):
+                        try:
+                            post["time"] = datetime.fromisoformat(post["time"])
+                        except:
+                            post["time"] = datetime.now()
+                    parsed_posts.append(post)
+                user_posts[int(user_id)] = parsed_posts
 
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
@@ -1350,15 +1354,15 @@ def restore_data_from_json(json_data):
                     user_daily_posts[user_id][network] = {}
                     for city, post_data in cities.items():
                         parsed_posts = []
-                        for p in post_data.get("posts", []):
+                        for post in post_data.get("posts", []):
                             try:
-                                parsed_posts.append(datetime.fromisoformat(p))
+                                parsed_posts.append(datetime.fromisoformat(post))
                             except:
                                 continue
                         parsed_deleted = []
-                        for p in post_data.get("deleted_posts", []):
+                        for post in post_data.get("deleted_posts", []):
                             try:
-                                parsed_deleted.append(datetime.fromisoformat(p))
+                                parsed_deleted.append(datetime.fromisoformat(post))
                             except:
                                 continue
                         user_daily_posts[user_id][network][city] = {
@@ -1366,10 +1370,12 @@ def restore_data_from_json(json_data):
                             "deleted_posts": parsed_deleted
                         }
 
+            # Вернём админов, но безопасно
             admins = [int(a) for a in data.get("admins", [])]
-            save_data()
 
+            save_data()
         return True
+
     except Exception as e:
         print(f"[ERROR] restore_data_from_json: {e}")
         return False
@@ -1380,14 +1386,11 @@ def handle_restore_file(message):
         return
     try:
         bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
-
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
-        json_data = downloaded.decode("utf-8")
-
-        success = restore_data_from_json(json_data)
-
+        success = restore_data_from_json(downloaded.decode("utf-8"))
         if success:
+            add_admin_user(message.chat.id)  # вернуть админ-права отправителю
             bot.send_message(message.chat.id, "✅ Данные успешно восстановлены.")
         else:
             bot.send_message(message.chat.id, "❌ Ошибка при восстановлении.")
