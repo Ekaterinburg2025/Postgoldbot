@@ -273,7 +273,7 @@ def add_admin_user(user_id):
             conn.commit()
 
 def is_admin(user_id):
-    STATIC_ADMINS = [479938867]  # Твой ID
+    STATIC_ADMINS = [479938867, 7235010425]   # <-- твой и второго админа ID
     return user_id in STATIC_ADMINS
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
@@ -1311,6 +1311,7 @@ def handle_restore_start(message):
     if not is_admin(message.chat.id):
         bot.send_message(message.chat.id, "⛔ У вас нет прав.")
         return
+
     bot.send_message(message.chat.id, "📁 Отправьте файл JSON для восстановления:")
     bot.register_next_step_handler(message, handle_restore_file)
 
@@ -1318,21 +1319,25 @@ def handle_restore_file(message):
     if not message.document:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте корректный .json файл.")
         return
+
     try:
-        bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
+
+        bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
+
         success = restore_data_from_json(downloaded.decode("utf-8"))
+
         if success:
-            bot.send_message(message.chat.id, "✅ Данные успешно восстановлены.")
+            bot.send_message(message.chat.id, "✅ Восстановление завершено успешно.")
         else:
-            bot.send_message(message.chat.id, "❌ Ошибка при восстановлении.")
+            bot.send_message(message.chat.id, "❌ Ошибка восстановления: возможно, неверный формат файла.")
+
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка загрузки файла: {e}")
+        bot.send_message(message.chat.id, f"❌ Ошибка загрузки или восстановления: {e}")
 
 def restore_data_from_json(json_data):
     try:
-        bot.send_message(ADMIN_CHAT_ID, "🛠 Восстановление: старт обработки JSON...")
         data = json.loads(json_data)
 
         with db_lock:
@@ -1393,15 +1398,14 @@ def restore_data_from_json(json_data):
                             "deleted_posts": deleted
                         }
 
-            # 🛡 Админы
+            # 🛡 Админы (временные, сохраняются, но STATIC_ADMINS всегда работает)
             admins = [int(a) for a in data.get("admins", [])]
 
             save_data()
-        bot.send_message(ADMIN_CHAT_ID, "✅ Восстановление завершено успешно.")
+
         return True
 
     except Exception as e:
-        bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка восстановления: {e}")
         print(f"[RESTORE ERROR] {e}")
         return False
 
