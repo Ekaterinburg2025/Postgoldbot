@@ -82,10 +82,14 @@ def load_data():
                 for user_id, network, city, end_date in cur.fetchall():
                     if user_id not in local_paid_users:
                         local_paid_users[user_id] = []
+                    try:
+                        parsed_date = datetime.fromisoformat(end_date)
+                    except Exception:
+                        parsed_date = None
                     local_paid_users[user_id].append({
                         "network": network,
                         "city": city,
-                        "end_date": datetime.fromisoformat(end_date)
+                        "end_date": parsed_date
                     })
 
                 # Загружаем админов
