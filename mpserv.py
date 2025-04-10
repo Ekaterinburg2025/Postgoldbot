@@ -796,8 +796,10 @@ def show_statistics_for_admin(chat_id):
                                 end_date_raw = paid.get("end_date")
                                 if isinstance(end_date_raw, datetime):
                                     end_date = end_date_raw
+                                elif isinstance(end_date_raw, str) and "-" in end_date_raw:
+                                    end_date = datetime.fromisoformat(end_date_raw)
                                 else:
-                                    end_date = datetime.fromisoformat(str(end_date_raw))
+                                    end_date = None
                             except Exception:
                                 end_date = None
                             break
