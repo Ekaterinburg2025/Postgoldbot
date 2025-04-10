@@ -422,10 +422,19 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
+                            # Безопасная обработка end_date
+                            end_date_obj = entry.get("end_date")
+                            if isinstance(end_date_obj, datetime):
+                                end_date_str = end_date_obj.isoformat()
+                            elif isinstance(end_date_obj, str):
+                                end_date_str = end_date_obj  # надеемся, валидная строка
+                            else:
+                                end_date_str = None
+
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+                            """, (user_id, entry["network"], entry["city"], end_date_str))
 
                     # Сохранение админов
                     for user_id in admins:
@@ -434,16 +443,24 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
+                            post_time = post["time"]
+                            if isinstance(post_time, datetime):
+                                post_time_str = post_time.isoformat()
+                            elif isinstance(post_time, str):
+                                post_time_str = post_time
+                            else:
+                                post_time_str = datetime.now().isoformat()
+
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
                                 user_id, post["network"], post["city"],
-                                post["time"], post["chat_id"], post["message_id"]
+                                post_time_str, post["chat_id"], post["message_id"]
                             ))
 
                     conn.commit()
-                    return
+                    return  # Успешно завершено
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
                     time.sleep(delay)
@@ -452,7 +469,7 @@ def save_data(retries=3, delay=0.5):
                     break
             except Exception:
                 break
-    # Не удалось сохранить после всех попыток
+    # Если не удалось сохранить после всех попыток — молча проигнорируем
 
 @bot.message_handler(commands=['start'])
 def start(message):
