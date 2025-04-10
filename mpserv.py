@@ -273,8 +273,8 @@ def add_admin_user(user_id):
             conn.commit()
 
 def is_admin(user_id):
-    admin_users = load_admin_users()  # Загружаем список администраторов
-    return user_id in admin_users  # Проверяем, есть ли пользователь в списке
+    STATIC_ADMINS = [479938867]  # Твой ID
+    return user_id in STATIC_ADMINS
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
