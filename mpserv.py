@@ -303,61 +303,73 @@ from pytz import timezone
 ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 def select_duration_for_payment(message, user_id, network, city):
-    if message.text == "Назад":
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        if network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif network == "НС":
-            cities = list(chat_ids_ns.keys())
-        else:
-            cities = []
-        markup.add(*cities)
-        markup.add("Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
-        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
-        return
-
-    duration = message.text
-    if duration == "День":
-        days = 1
-    elif duration == "Неделя":
-        days = 7
-    elif duration == "Месяц":
-        days = 30
-    else:
-        bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильный срок.")
-        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
-        return
-
-    expiry_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
-
-    if user_id not in paid_users:
-        paid_users[user_id] = []
-
-    paid_users[user_id].append({
-        "end_date": expiry_date.isoformat(),
-        "network": network,
-        "city": city
-    })
-
-    save_data()
-
-    # Получаем имя пользователя для отображения
     try:
-        user_info = bot.get_chat(user_id)
-        user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
-        if not user_name:
-            user_name = user_info.username or "Имя не указано"
-    except Exception:
-        user_name = "Имя не найдено"
+        if message.text == "Назад":
+            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
+            if network == "Мужской Клуб":
+                cities = list(chat_ids_mk.keys())
+            elif network == "ПАРНИ 18+":
+                cities = list(chat_ids_parni.keys())
+            elif network == "НС":
+                cities = list(chat_ids_ns.keys())
+            else:
+                cities = []
+            markup.add(*cities)
+            markup.add("Назад")
+            bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
+            bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
+            return
 
-    bot.send_message(
-        ADMIN_CHAT_ID,
-        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
-        f"📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
-    )
+        duration = message.text.strip()
+        if duration == "День":
+            days = 1
+        elif duration == "Неделя":
+            days = 7
+        elif duration == "Месяц":
+            days = 30
+        else:
+            bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильный срок.")
+            bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
+            return
+
+        # Убедимся, что tz определён
+        if 'ekaterinburg_tz' not in globals():
+            from pytz import timezone
+            global ekaterinburg_tz
+            ekaterinburg_tz = timezone("Asia/Yekaterinburg")
+
+        expiry_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
+        expiry_str = expiry_date.isoformat()
+
+        if user_id not in paid_users:
+            paid_users[user_id] = []
+
+        paid_users[user_id].append({
+            "end_date": expiry_str,
+            "network": network,
+            "city": city
+        })
+
+        save_data()
+
+        # Получаем имя пользователя для отображения
+        try:
+            user_info = bot.get_chat(user_id)
+            user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
+            if not user_name:
+                user_name = user_info.username or "Имя не указано"
+        except Exception:
+            user_name = "Имя не найдено"
+
+        bot.send_message(
+            ADMIN_CHAT_ID,
+            f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
+            f"📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+        )
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка добавления пользователя: {e}")
+        print(f"[ERROR in select_duration_for_payment] {e}")
 
 def is_today(dt):
     return dt.date() == datetime.now(ekaterinburg_tz).date()
