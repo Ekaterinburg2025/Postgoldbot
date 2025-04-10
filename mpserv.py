@@ -726,6 +726,7 @@ def handle_duration_change(call):
         print(f"Ошибка в handle_duration_change: {e}")
 
 def get_admin_statistics():
+    bot.send_message(ADMIN_CHAT_ID, f"[DEBUG] get_admin_statistics вызвана. Пользователей: {len(user_daily_posts)}")
     statistics = {}
 
     for user_id, networks in user_daily_posts.items():
@@ -739,7 +740,7 @@ def get_admin_statistics():
                 deleted_posts = len(post_data.get("deleted_posts", []))
                 total_posts = active_posts + deleted_posts
 
-                limit_total += 3  # Каждая связка = лимит 3
+                limit_total += 3
 
                 stats["details"][network][city] = {
                     "published": total_posts,
@@ -748,7 +749,6 @@ def get_admin_statistics():
 
                 stats["published"] += total_posts
 
-                # Добавим ссылку на сообщение, если нужно
                 for post in post_data.get("posts", []):
                     if isinstance(post, datetime) and is_today(post):
                         for user_post in user_posts.get(user_id, []):
@@ -760,7 +760,6 @@ def get_admin_statistics():
         stats["remaining"] = max(0, limit_total - stats["published"])
         statistics[user_id] = stats
 
-    print(f"[DEBUG] Статистика для админа: {statistics}")
     return statistics
 
 @bot.message_handler(commands=['statistics'])
@@ -1123,14 +1122,16 @@ def handle_stats_button(message):
             response += "\n📍 Детали по сетям:\n"
             for network, cities in stats["details"].items():
                 for city, data in cities.items():
-                    # Получаем дату окончания подписки
+                    # Получаем дату окончания подписки с учётом 'Все сети'
                     end_date = None
                     for paid in paid_users.get(message.from_user.id, []):
-                        if paid["network"] == network and paid["city"] == city:
+                        if (
+                            (paid["network"] == network and paid["city"] == city) or
+                            (paid["network"] == "Все сети" and paid["city"] == city)
+                        ):
                             end_date = paid["end_date"]
                             break
 
-                    # ✅ преобразуем строку в datetime, если нужно
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
@@ -1146,8 +1147,7 @@ def handle_stats_button(message):
         bot.send_message(message.chat.id, response)
 
     except Exception as e:
-        print(f"[ERROR] Ошибка при показе статистики: {e}")
-        bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
+        bot.send_message(message.chat.id, f"Произошла ошибка при получении статистики: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
 def handle_admin_statistics(call):
