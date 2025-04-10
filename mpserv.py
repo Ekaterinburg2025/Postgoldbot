@@ -390,9 +390,12 @@ def get_user_statistics(user_id):
     return stats
 
 def is_today(timestamp):
-    """Проверяет, относится ли временная метка к сегодняшнему дню."""
     now = datetime.now()
-    return datetime.fromisoformat(timestamp).date() == now.date()
+    try:
+        parsed_time = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp
+        return parsed_time.date() == now.date()
+    except:
+        return False
 
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
@@ -712,12 +715,20 @@ def show_paid_users(message):
         
         response += f"Пользователь {user_name}:\n"
         for entry in entries:
-            end_date = entry["end_date"]
+            end_date = entry.get("end_date")
             if isinstance(end_date, str):
-                end_date = datetime.fromisoformat(end_date)
-            response += f" - Сеть: {entry['network']}, Город: {entry['city']}, " + \
-                       f"Срок: {end_date.strftime('%d.%m.%Y %H:%M')}\n"
-    
+                try:
+                    end_date = datetime.fromisoformat(end_date)
+                except:
+                    end_date = None
+
+            if isinstance(end_date, datetime):
+                date_str = end_date.strftime('%d.%m.%Y %H:%M')
+            else:
+                date_str = "неизвестно"
+
+            response += f" - Сеть: {entry['network']}, Город: {entry['city']}, Срок: {date_str}\n"
+
     bot.send_message(message.chat.id, response)
 
 def get_all_cities_for_network(network):
@@ -742,16 +753,22 @@ def handle_duration_change(call):
             return
 
         for entry in paid_users[user_id]:
-            end_date = entry["end_date"]
-            if isinstance(end_date, str):  # Если дата в формате строки
-                end_date = datetime.fromisoformat(end_date)
-            entry["end_date"] = end_date + timedelta(days=days)
+            end_date = entry.get("end_date")
+            if isinstance(end_date, str):
+                try:
+                    end_date = datetime.fromisoformat(end_date)
+                except:
+                    end_date = None
+
+            if isinstance(end_date, datetime):
+                entry["end_date"] = end_date + timedelta(days=days)
 
         save_data()
         bot.answer_callback_query(call.id, f"✅ Срок изменён на {days} дней.")
         show_paid_users(call.message)
     except Exception as e:
         print(f"Ошибка в handle_duration_change: {e}")
+        bot.answer_callback_query(call.id, " Произошла ошибка при изменении срока.")
 
 def get_admin_statistics():
     statistics = {}
@@ -820,21 +837,16 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date_raw = paid.get("end_date")
-                            bot.send_message(chat_id, f"🛠 DEBUG → end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
-                            try:
-                                if isinstance(end_date_raw, datetime):
-                                    end_date = end_date_raw
-                                elif isinstance(end_date_raw, str):
-                                    end_date = datetime.fromisoformat(end_date_raw)
-                                else:
-                                    end_date = None
-                            except Exception as e:
-                                end_date = None
-                                bot.send_message(chat_id, f"❌ Ошибка разбора даты: {e}")
+                            end_date = paid.get("end_date")
                             break
 
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
+
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
                     response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
 
         if user_stats["links"]:
@@ -885,8 +897,12 @@ def handle_duration_change(call):
         # Обновляем срок оплаты для всех записей пользователя
         for entry in paid_users[user_id]:
             end_date = entry["end_date"]
-            if isinstance(end_date, str):  # Если дата в формате строки
+            end_date = entry["end_date"]
+            if isinstance(end_date, str):
+                try:
                 end_date = datetime.fromisoformat(end_date)
+                except:
+                    end_date = None
             entry["end_date"] = end_date + timedelta(days=days)
 
         # Сохраняем изменения
@@ -1174,14 +1190,13 @@ def handle_stats_button(message):
             response += "\n📍 Детали по сетям:\n"
             for network, cities in stats["details"].items():
                 for city, data in cities.items():
-                    # Получаем дату окончания подписки с учётом 'Все сети'
                     end_date = None
                     for paid in paid_users.get(message.from_user.id, []):
                         if (
                             (paid["network"] == network and paid["city"] == city) or
                             (paid["network"] == "Все сети" and paid["city"] == city)
                         ):
-                            end_date = paid["end_date"]
+                            end_date = paid.get("end_date")
                             break
 
                     if isinstance(end_date, str):
@@ -1190,7 +1205,7 @@ def handle_stats_button(message):
                         except:
                             end_date = None
 
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
                     response += (
                         f"  └ {network}, {city} {expire_str}: "
                         f"{data['published']} опубликовано, {data['remaining']} осталось\n"
