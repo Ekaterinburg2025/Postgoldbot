@@ -82,10 +82,18 @@ def load_data():
                 for user_id, network, city, end_date in cur.fetchall():
                     if user_id not in local_paid_users:
                         local_paid_users[user_id] = []
-                    try:
-                        parsed_date = datetime.fromisoformat(end_date)
-                    except Exception:
+
+                    # Приводим end_date к datetime
+                    if isinstance(end_date, datetime):
+                        parsed_date = end_date
+                    elif isinstance(end_date, str):
+                        try:
+                            parsed_date = datetime.fromisoformat(end_date)
+                        except:
+                            parsed_date = None
+                    else:
                         parsed_date = None
+
                     local_paid_users[user_id].append({
                         "network": network,
                         "city": city,
@@ -104,7 +112,7 @@ def load_data():
                         local_user_posts[user_id] = []
                     try:
                         post_time = datetime.fromisoformat(time_str)
-                    except Exception:
+                    except:
                         post_time = datetime.now()
                     local_user_posts[user_id].append({
                         "message_id": message_id,
@@ -114,7 +122,13 @@ def load_data():
                         "network": network
                     })
 
-                return local_paid_users, local_admins, local_user_posts
+                # Заменяем глобальные переменные
+                global paid_users, admins, user_posts
+                paid_users = local_paid_users
+                admins = local_admins
+                user_posts = local_user_posts
+
+                return paid_users, admins, user_posts
 
         except Exception as e:
             print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
@@ -422,19 +436,10 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
-                            # Безопасная обработка end_date
-                            end_date_obj = entry.get("end_date")
-                            if isinstance(end_date_obj, datetime):
-                                end_date_str = end_date_obj.isoformat()
-                            elif isinstance(end_date_obj, str):
-                                end_date_str = end_date_obj  # надеемся, валидная строка
-                            else:
-                                end_date_str = None
-
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], end_date_str))
+                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
                     # Сохранение админов
                     for user_id in admins:
@@ -443,24 +448,16 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
-                            post_time = post["time"]
-                            if isinstance(post_time, datetime):
-                                post_time_str = post_time.isoformat()
-                            elif isinstance(post_time, str):
-                                post_time_str = post_time
-                            else:
-                                post_time_str = datetime.now().isoformat()
-
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
                                 user_id, post["network"], post["city"],
-                                post_time_str, post["chat_id"], post["message_id"]
+                                post["time"], post["chat_id"], post["message_id"]
                             ))
 
                     conn.commit()
-                    return  # Успешно завершено
+                    return
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
                     time.sleep(delay)
@@ -469,7 +466,7 @@ def save_data(retries=3, delay=0.5):
                     break
             except Exception:
                 break
-    # Если не удалось сохранить после всех попыток — молча проигнорируем
+    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
