@@ -40,7 +40,7 @@ paid_users = {}
 user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
-admins = []
+STATIC_ADMINS = {479938867, 7235010425}  # Статичные ID администраторов
 db_lock = threading.Lock()
 
 # Инициализация базы данных
@@ -253,8 +253,8 @@ def add_admin_user(user_id):
         if user_id not in admins:
             admins.append(user_id)
             save_data()
-
-    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+    if user_id != ADMIN_CHAT_ID:
+        bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
     bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
 def load_admin_users():
@@ -262,8 +262,7 @@ def load_admin_users():
         with sqlite3.connect("bot_data.db") as conn:
             cur = conn.cursor()
             cur.execute("SELECT user_id FROM admin_users")
-            admin_users = [row[0] for row in cur.fetchall()]
-            return admin_users  # Возвращаем список администраторов
+            return [row[0] for row in cur.fetchall()]
 
 def add_admin_user(user_id):
     with db_lock:
@@ -273,8 +272,7 @@ def add_admin_user(user_id):
             conn.commit()
 
 def is_admin(user_id):
-    STATIC_ADMINS = [479938867, 7235010425]   # <-- твой и второго админа ID
-    return user_id in STATIC_ADMINS
+    return user_id in STATIC_ADMINS or user_id in admins
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
@@ -1438,6 +1436,11 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
-    add_admin_user(479938867)  # Только один раз!
+    # ✅ Добавляем всех статичных админов при запуске
+    STATIC_ADMINS = [479938867, 7235010425]
+    for admin_id in STATIC_ADMINS:
+        add_admin_user(admin_id)
+
+    # Запускаем Flask-приложение
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
