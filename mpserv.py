@@ -336,6 +336,9 @@ def select_duration_for_payment(message, user_id, network, city):
         f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
     )
 
+def is_today(dt):
+    return dt.date() == datetime.now().date()
+
 def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
     limit_total = 0
@@ -352,13 +355,12 @@ def get_user_statistics(user_id):
             active_access.append((access["network"], access["city"]))
 
     for network, city in active_access:
+        total_posts = 0
         if user_id in user_daily_posts and network in user_daily_posts[user_id] and city in user_daily_posts[user_id][network]:
             post_data = user_daily_posts[user_id][network][city]
-            active_posts = len(post_data.get("posts", []))
-            deleted_posts = len(post_data.get("deleted_posts", []))
+            active_posts = len([p for p in post_data.get("posts", []) if is_today(p)])
+            deleted_posts = len([p for p in post_data.get("deleted_posts", []) if is_today(p)])
             total_posts = active_posts + deleted_posts
-        else:
-            total_posts = 0
 
         limit_total += 3
         if network not in stats["details"]:
@@ -1040,11 +1042,16 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
 
+    # Проверка лимита по конкретному городу и сети
+    user_stats = get_user_statistics(user_id)
+    city_stats = user_stats.get("details", {}).get(selected_network, {}).get(city, {})
+    if city_stats.get("remaining", 0) <= 0:
+        bot.send_message(message.chat.id, "⛔ Вы исчерпали лимит публикаций в этом городе на сегодня.")
+        return
+
     # Проверка на наличие оплаты
     if is_user_paid(user_id, selected_network, city):
-        signature = network_signatures.get(selected_network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
-
         networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
         for network in networks:
@@ -1094,29 +1101,15 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "city": city,
                     "network": network
                 })
-
-                # ✅ Обновим user_daily_posts для статистики
-                if user_id not in user_daily_posts:
-                    user_daily_posts[user_id] = {}
-                if network not in user_daily_posts[user_id]:
-                    user_daily_posts[user_id][network] = {}
-                if city not in user_daily_posts[user_id][network]:
-                    user_daily_posts[user_id][network][city] = {
-                        "posts": [],
-                        "deleted_posts": []
-                    }
-                user_daily_posts[user_id][network][city]["posts"].append(datetime.now())
-
                 bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
 
         ask_for_new_post(message)
-
     else:
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
+        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
