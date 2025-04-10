@@ -464,13 +464,21 @@ def save_data(retries=3, delay=0.5):
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # Сохранение оплативших пользователей
+                    # ✅ Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
+                            end_date = entry["end_date"]
+                            if isinstance(end_date, datetime):
+                                end_date_str = end_date.isoformat()
+                            elif isinstance(end_date, str):
+                                end_date_str = end_date
+                            else:
+                                end_date_str = None
+
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+                            """, (user_id, entry["network"], entry["city"], end_date_str))
 
                     # Сохранение админов
                     for user_id in admins:
@@ -483,8 +491,12 @@ def save_data(retries=3, delay=0.5):
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
-                                user_id, post["network"], post["city"],
-                                post["time"], post["chat_id"], post["message_id"]
+                                user_id,
+                                post["network"],
+                                post["city"],
+                                post["time"].isoformat() if isinstance(post["time"], datetime) else post["time"],
+                                post["chat_id"],
+                                post["message_id"]
                             ))
 
                     conn.commit()
@@ -495,7 +507,8 @@ def save_data(retries=3, delay=0.5):
                     continue
                 else:
                     break
-            except Exception:
+            except Exception as e:
+                print(f"[SAVE ERROR] {e}")
                 break
     # Не удалось сохранить после всех попыток
 
