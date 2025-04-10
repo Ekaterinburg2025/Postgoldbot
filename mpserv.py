@@ -1334,7 +1334,7 @@ def restore_data_from_json(json_data):
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
-            # 🔹 Восстановление paid_users
+            # 🔹 Восстановление оплативших пользователей
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 paid_users[int(user_id)] = []
@@ -1351,37 +1351,36 @@ def restore_data_from_json(json_data):
                         "end_date": end_date
                     })
 
-            # 🔹 Восстановление user_posts
+            # 🔹 Восстановление публикаций
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
                 user_posts[int(user_id)] = []
                 for post in posts:
-                    try:
-                        if isinstance(post.get("time"), str):
+                    if isinstance(post.get("time"), str):
+                        try:
                             post["time"] = datetime.fromisoformat(post["time"])
-                    except Exception as e:
-                        print(f"[WARN] Ошибка парсинга времени в user_posts: {e}")
-                        post["time"] = datetime.now(ekaterinburg_tz)
+                        except:
+                            post["time"] = datetime.now()
                     user_posts[int(user_id)].append(post)
 
-            # 🔹 Восстановление user_daily_posts
+            # 🔹 Восстановление дневной статистики
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
                 user_id = int(user_id)
                 user_daily_posts[user_id] = {}
                 for network, cities in networks.items():
                     user_daily_posts[user_id][network] = {}
-                    for city, posts in cities.items():
+                    for city, post_data in cities.items():
                         parsed_posts = []
-                        for post in posts.get("posts", []):
+                        for p in post_data.get("posts", []):
                             try:
-                                parsed_posts.append(datetime.fromisoformat(post))
+                                parsed_posts.append(datetime.fromisoformat(p))
                             except:
                                 continue
                         parsed_deleted = []
-                        for post in posts.get("deleted_posts", []):
+                        for p in post_data.get("deleted_posts", []):
                             try:
-                                parsed_deleted.append(datetime.fromisoformat(post))
+                                parsed_deleted.append(datetime.fromisoformat(p))
                             except:
                                 continue
                         user_daily_posts[user_id][network][city] = {
@@ -1389,15 +1388,11 @@ def restore_data_from_json(json_data):
                             "deleted_posts": parsed_deleted
                         }
 
-            # 🔹 Восстановление админов (❗ не забываем оставить текущих)
-            current_admins = set(admins)  # сохранить уже назначенных
-            new_admins = {int(a) for a in data.get("admins", [])}
-            admins = list(current_admins.union(new_admins))
+            # 🔹 Восстановление админов
+            admins = [int(a) for a in data.get("admins", [])]
 
             save_data()
-
         return True
-
     except Exception as e:
         print(f"[ERROR] restore_data_from_json: {e}")
         return False
