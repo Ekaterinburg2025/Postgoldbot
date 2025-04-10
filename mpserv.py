@@ -763,14 +763,14 @@ def get_admin_statistics():
     return statistics
 
 @bot.message_handler(commands=['statistics'])
-def show_statistics(message):
-    if not is_admin(message.chat.id):
-        bot.send_message(message.chat.id, "У вас нет прав для просмотра статистики.")
+def show_statistics_for_admin(chat_id):
+    if not is_admin(chat_id):
+        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
         return
 
     stats = get_admin_statistics()
     if not stats:
-        bot.send_message(message.chat.id, "Нет данных о публикациях.")
+        bot.send_message(chat_id, "Нет данных о публикациях.")
         return
 
     response = "📊 Статистика публикаций:\n"
@@ -787,7 +787,6 @@ def show_statistics(message):
             response += "  • Детали:\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
-                    # Защищённый способ получения срока оплаты
                     end_date = None
                     for paid in paid_users.get(user_id, []):
                         if (
@@ -814,9 +813,9 @@ def show_statistics(message):
         response += "\n"
 
     try:
-        bot.send_message(message.chat.id, response)
+        bot.send_message(chat_id, response)
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка при отправке статистики: {e}")
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
@@ -1164,11 +1163,10 @@ def handle_stats_button(message):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
 def handle_admin_statistics(call):
     try:
-        print("[DEBUG] Нажата кнопка admin_statistics")  # временно
-        show_statistics(call.message)
+        bot.answer_callback_query(call.id)  # чтобы Telegram не висел
+        show_statistics_for_admin(call.message.chat.id)
     except Exception as e:
-        bot.answer_callback_query(call.id, "Произошла ошибка при показе статистики.")
-        print(f"[ERROR] Ошибка в admin_statistics: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_statistics: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
