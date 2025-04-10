@@ -501,42 +501,6 @@ def save_backup_to_json():
         json_data = json.dumps(data, default=str, indent=2)
         return BytesIO(json_data.encode("utf-8"))
 
-def restore_data_from_json(file_content):
-    global paid_users, user_posts, user_daily_posts, admins
-    with db_lock:
-        try:
-            data = json.loads(file_content)
-
-            paid_users = data.get("paid_users", {})
-            user_posts = data.get("user_posts", {})
-            user_daily_posts = data.get("user_daily_posts", {})
-            admins = data.get("admins", [])
-
-            # Преобразование дат
-            for user_id, posts in user_posts.items():
-                for post in posts:
-                    post["time"] = datetime.fromisoformat(post["time"])
-
-            for user_id, networks in user_daily_posts.items():
-                for network, cities in networks.items():
-                    for city, post_data in cities.items():
-                        post_data["posts"] = [datetime.fromisoformat(p) for p in post_data.get("posts", [])]
-                        post_data["deleted_posts"] = [datetime.fromisoformat(p) for p in post_data.get("deleted_posts", [])]
-
-            for user_id, entries in paid_users.items():
-                for entry in entries:
-                    if isinstance(entry["end_date"], str):
-                        try:
-                            entry["end_date"] = datetime.fromisoformat(entry["end_date"])
-                        except:
-                            entry["end_date"] = None
-
-            save_data()
-            return True
-        except Exception as e:
-            print(f"[ERROR] Ошибка восстановления: {e}")
-            return False
-
 @bot.message_handler(commands=['start'])
 def start(message):
     try:
