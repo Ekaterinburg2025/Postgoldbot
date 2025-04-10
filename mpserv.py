@@ -606,9 +606,9 @@ def handle_admin_callback(call):
             bot.send_message(call.message.chat.id, "Введите ID нового администратора:")
             bot.register_next_step_handler(call.message, add_admin_step)
         elif call.data == "admin_statistics":
-            show_statistics(call.message)
+            show_statistics_for_admin(call.message.chat.id)
     except Exception as e:
-        print(f"Ошибка в handle_admin_callback: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_callback: {e}")
 
 # Функция для добавления оплатившего
 def process_user_id_for_payment(message):
@@ -1160,15 +1160,6 @@ def handle_stats_button(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"Произошла ошибка при получении статистики: {e}")
 
-@bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
-def handle_admin_statistics(call):
-    try:
-        bot.answer_callback_query(call.id)
-        show_statistics_for_admin(call.message.chat.id)
-    except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_statistics: {e}")
-
-
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
         bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
@@ -1222,11 +1213,6 @@ def show_statistics_for_admin(chat_id):
         bot.send_message(chat_id, response)
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
-
-@bot.callback_query_handler(func=lambda call: True)
-def catch_all_callbacks(call):
-    bot.answer_callback_query(call.id, "✅ Кнопка нажата")
-    bot.send_message(call.message.chat.id, f"[DEBUG] Вы нажали: {call.data}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
