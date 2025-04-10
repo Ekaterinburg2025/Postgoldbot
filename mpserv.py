@@ -1223,6 +1223,11 @@ def show_statistics_for_admin(chat_id):
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
 
+@bot.callback_query_handler(func=lambda call: True)
+def catch_all_callbacks(call):
+    bot.answer_callback_query(call.id, "✅ Кнопка нажата")
+    bot.send_message(call.message.chat.id, f"[DEBUG] Вы нажали: {call.data}")
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
