@@ -1313,6 +1313,7 @@ def handle_restore_start(message):
 
 def restore_data_from_json(json_data):
     try:
+        bot.send_message(ADMIN_CHAT_ID, "📥 Начинаю восстановление данных...")
         data = json.loads(json_data)
 
         with db_lock:
@@ -1326,8 +1327,7 @@ def restore_data_from_json(json_data):
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
-                        except Exception as e:
-                            print(f"[WARN] Ошибка парсинга end_date: {end_date} → {e}")
+                        except:
                             end_date = None
                     paid_users[int(user_id)].append({
                         "network": entry["network"],
@@ -1337,13 +1337,7 @@ def restore_data_from_json(json_data):
 
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
-                user_posts[int(user_id)] = []
-                for post in posts:
-                    try:
-                        post['time'] = datetime.fromisoformat(post['time']) if isinstance(post['time'], str) else post['time']
-                        user_posts[int(user_id)].append(post)
-                    except Exception as e:
-                        print(f"[WARN] Ошибка в user_posts → {e}")
+                user_posts[int(user_id)] = posts
 
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
@@ -1356,14 +1350,14 @@ def restore_data_from_json(json_data):
                         for post in posts.get("posts", []):
                             try:
                                 parsed_posts.append(datetime.fromisoformat(post))
-                            except Exception as e:
-                                print(f"[WARN] Ошибка posts: {post} → {e}")
+                            except:
+                                continue
                         parsed_deleted = []
                         for post in posts.get("deleted_posts", []):
                             try:
                                 parsed_deleted.append(datetime.fromisoformat(post))
-                            except Exception as e:
-                                print(f"[WARN] Ошибка deleted_posts: {post} → {e}")
+                            except:
+                                continue
                         user_daily_posts[user_id][network][city] = {
                             "posts": parsed_posts,
                             "deleted_posts": parsed_deleted
@@ -1372,10 +1366,10 @@ def restore_data_from_json(json_data):
             admins = [int(a) for a in data.get("admins", [])]
 
             save_data()
-
+        bot.send_message(ADMIN_CHAT_ID, "✅ Восстановление завершено успешно.")
         return True
     except Exception as e:
-        print(f"[ERROR] restore_data_from_json: {e}")
+        bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка восстановления: {e}")
         return False
 
 def handle_restore_file(message):
