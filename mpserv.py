@@ -587,7 +587,7 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("Список оплативших", callback_data="admin_list_paid_users"))
     markup.add(types.InlineKeyboardButton("Изменить срок оплаты", callback_data="admin_change_duration"))
     markup.add(types.InlineKeyboardButton("Добавить администратора", callback_data="admin_add_admin"))
-    markup.add(types.InlineKeyboardButton("Статистика публикаций", callback_data="admin_statistics"))
+    markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
     bot.send_message(message.chat.id, "Админ-панель:", reply_markup=markup)
 
 # Обработчик callback-запросов админ-панели
