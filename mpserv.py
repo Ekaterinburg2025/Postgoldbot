@@ -798,14 +798,16 @@ def show_statistics_for_admin(chat_id):
                         ):
                             try:
                                 end_date_raw = paid.get("end_date")
+                                bot.send_message(chat_id, f"🛠 end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
                                 if isinstance(end_date_raw, datetime):
                                     end_date = end_date_raw
-                                elif isinstance(end_date_raw, str) and "-" in end_date_raw:
+                                elif isinstance(end_date_raw, str) and "T" in end_date_raw:
                                     end_date = datetime.fromisoformat(end_date_raw)
                                 else:
                                     end_date = None
-                            except Exception:
+                            except Exception as e:
                                 end_date = None
+                                bot.send_message(chat_id, f"❌ Ошибка разбора даты: {e}")
                             break
 
                     expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
