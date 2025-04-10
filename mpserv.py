@@ -512,7 +512,7 @@ def restore_data_from_json(file_content):
             user_daily_posts = data.get("user_daily_posts", {})
             admins = data.get("admins", [])
 
-            # Преобразование дат обратно
+            # Преобразование дат
             for user_id, posts in user_posts.items():
                 for post in posts:
                     post["time"] = datetime.fromisoformat(post["time"])
@@ -1346,6 +1346,65 @@ def handle_restore_start(message):
         return
     bot.send_message(message.chat.id, "📁 Отправьте файл JSON для восстановления:")
     bot.register_next_step_handler(message, handle_restore_file)
+
+def restore_data_from_json(json_data):
+    try:
+        data = json.loads(json_data)
+
+        with db_lock:
+            global paid_users, user_posts, user_daily_posts, admins
+
+            paid_users = {}
+            for user_id, entries in data.get("paid_users", {}).items():
+                paid_users[int(user_id)] = []
+                for entry in entries:
+                    end_date = entry.get("end_date")
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
+                    paid_users[int(user_id)].append({
+                        "network": entry["network"],
+                        "city": entry["city"],
+                        "end_date": end_date
+                    })
+
+            user_posts = {}
+            for user_id, posts in data.get("user_posts", {}).items():
+                user_posts[int(user_id)] = posts
+
+            user_daily_posts = {}
+            for user_id, networks in data.get("user_daily_posts", {}).items():
+                user_id = int(user_id)
+                user_daily_posts[user_id] = {}
+                for network, cities in networks.items():
+                    user_daily_posts[user_id][network] = {}
+                    for city, posts in cities.items():
+                        parsed_posts = []
+                        for post in posts.get("posts", []):
+                            try:
+                                parsed_posts.append(datetime.fromisoformat(post))
+                            except:
+                                continue
+                        parsed_deleted = []
+                        for post in posts.get("deleted_posts", []):
+                            try:
+                                parsed_deleted.append(datetime.fromisoformat(post))
+                            except:
+                                continue
+                        user_daily_posts[user_id][network][city] = {
+                            "posts": parsed_posts,
+                            "deleted_posts": parsed_deleted
+                        }
+
+            admins = [int(a) for a in data.get("admins", [])]
+
+            save_data()
+        return True
+    except Exception as e:
+        print(f"[ERROR] restore_data_from_json: {e}")
+        return False
 
 def handle_restore_file(message):
     if not message.document:
