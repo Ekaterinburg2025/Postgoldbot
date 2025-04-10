@@ -1007,10 +1007,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_name = get_user_name(message.from_user)
 
     # Проверка на наличие оплаты
-    if is_user_paid(user_id, selected_network, city):  # Используем проверку оплаты вместо VIP
-        # Если оплата есть, продолжаем публикацию
+    if is_user_paid(user_id, selected_network, city):
         signature = network_signatures.get(selected_network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
         networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
         for network in networks:
@@ -1023,7 +1023,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             else:
                 continue
 
-            # Если сеть НС, делаем замену названия города, если требуется
             if network == "НС":
                 if city not in chat_dict and city in ns_city_substitution:
                     substitute_city = ns_city_substitution[city]
@@ -1061,6 +1060,19 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "city": city,
                     "network": network
                 })
+
+                # ✅ Обновим user_daily_posts для статистики
+                if user_id not in user_daily_posts:
+                    user_daily_posts[user_id] = {}
+                if network not in user_daily_posts[user_id]:
+                    user_daily_posts[user_id][network] = {}
+                if city not in user_daily_posts[user_id][network]:
+                    user_daily_posts[user_id][network][city] = {
+                        "posts": [],
+                        "deleted_posts": []
+                    }
+                user_daily_posts[user_id][network][city]["posts"].append(datetime.now())
+
                 bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
@@ -1068,7 +1080,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         ask_for_new_post(message)
 
     else:
-        # Если оплаты нет, предлагаем купить рекламу
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
