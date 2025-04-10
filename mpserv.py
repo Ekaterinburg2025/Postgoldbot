@@ -427,14 +427,15 @@ def check_payment(user_id, network, city):
     for payment in paid_users[user_id]:
         end_date = payment.get("end_date")
 
+        # Безопасная проверка срока действия
         if isinstance(end_date, str):
             try:
                 end_date = datetime.fromisoformat(end_date)
-            except:
+            except Exception:
                 end_date = None
 
-        if not end_date or end_date < datetime.now(ekaterinburg_tz):
-            print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
+        if not isinstance(end_date, datetime) or end_date < datetime.now(ekaterinburg_tz):
+            print(f"[DEBUG] Срок оплаты истёк или дата некорректна: {payment}")
             continue
 
         # Если оплачен доступ ко всем сетям для этого города
@@ -1405,45 +1406,44 @@ def restore_data_from_json(json_data):
 
             # 👤 Оплатившие
             paid_users = {}
-            for user_id_str, entries in data.get("paid_users", {}).items():
-                user_id = int(user_id_str)
-                paid_users[user_id] = []
+            for user_id, entries in data.get("paid_users", {}).items():
+                uid = int(user_id)
+                paid_users[uid] = []
                 for entry in entries:
                     end_date = entry.get("end_date")
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
                         except Exception:
-                            print(f"[WARN] Некорректная дата у пользователя {user_id}: {end_date}")
                             end_date = None
-                    paid_users[user_id].append({
+                    paid_users[uid].append({
                         "network": entry.get("network"),
                         "city": entry.get("city"),
-                        "end_date": end_date
+                        "end_date": end_date  # ← уже нормализовано
                     })
 
             # 📨 Посты
             user_posts = {}
-            for user_id_str, posts in data.get("user_posts", {}).items():
-                user_id = int(user_id_str)
-                user_posts[user_id] = []
+            for user_id, posts in data.get("user_posts", {}).items():
+                uid = int(user_id)
+                user_posts[uid] = []
                 for post in posts:
                     try:
                         post["time"] = datetime.fromisoformat(post["time"])
                     except Exception:
                         post["time"] = datetime.now()
-                    user_posts[user_id].append(post)
+                    user_posts[uid].append(post)
 
             # 📊 Лимиты
             user_daily_posts = {}
-            for user_id_str, networks in data.get("user_daily_posts", {}).items():
-                user_id = int(user_id_str)
-                user_daily_posts[user_id] = {}
+            for user_id, networks in data.get("user_daily_posts", {}).items():
+                uid = int(user_id)
+                user_daily_posts[uid] = {}
                 for network, cities in networks.items():
-                    user_daily_posts[user_id][network] = {}
+                    user_daily_posts[uid][network] = {}
                     for city, post_data in cities.items():
                         posts = []
-                        deleted_posts = []
+                        deleted = []
                         for p in post_data.get("posts", []):
                             try:
                                 posts.append(datetime.fromisoformat(p))
@@ -1451,12 +1451,12 @@ def restore_data_from_json(json_data):
                                 continue
                         for d in post_data.get("deleted_posts", []):
                             try:
-                                deleted_posts.append(datetime.fromisoformat(d))
+                                deleted.append(datetime.fromisoformat(d))
                             except:
                                 continue
-                        user_daily_posts[user_id][network][city] = {
+                        user_daily_posts[uid][network][city] = {
                             "posts": posts,
-                            "deleted_posts": deleted_posts
+                            "deleted_posts": deleted
                         }
 
             # 🛡 Админы
