@@ -194,7 +194,7 @@ user_posts = {}
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления", "Моя статистика")
+    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления", "📊 Моя статистика")
     return markup
 
 def format_time(timestamp):
@@ -1108,6 +1108,14 @@ def handle_stats_button(message):
     except Exception as e:
         print(f"[ERROR] Ошибка при показе статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
+def handle_admin_statistics(call):
+    try:
+        show_statistics(call.message)
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Произошла ошибка при показе статистики.")
+        print(f"[ERROR] Ошибка в admin_statistics: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
