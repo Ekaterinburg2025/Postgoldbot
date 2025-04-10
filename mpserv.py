@@ -1311,13 +1311,31 @@ def handle_restore_start(message):
     bot.send_message(message.chat.id, "📁 Отправьте файл JSON для восстановления:")
     bot.register_next_step_handler(message, handle_restore_file)
 
+def handle_restore_file(message):
+    if not message.document:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте корректный .json файл.")
+        return
+    try:
+        bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
+        file_info = bot.get_file(message.document.file_id)
+        downloaded = bot.download_file(file_info.file_path)
+        success = restore_data_from_json(downloaded.decode("utf-8"))
+        if success:
+            bot.send_message(message.chat.id, "✅ Данные успешно восстановлены.")
+        else:
+            bot.send_message(message.chat.id, "❌ Ошибка при восстановлении.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка загрузки файла: {e}")
+
 def restore_data_from_json(json_data):
     try:
+        print("[DEBUG] 🔄 Начинаю разбор JSON...")
         data = json.loads(json_data)
 
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
+            print("[DEBUG] 🧠 Загружаем paid_users...")
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 paid_users[int(user_id)] = []
@@ -1334,18 +1352,20 @@ def restore_data_from_json(json_data):
                         "end_date": end_date
                     })
 
+            print("[DEBUG] 🧠 Загружаем user_posts...")
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
-                parsed_posts = []
+                parsed = []
                 for post in posts:
                     if isinstance(post.get("time"), str):
                         try:
                             post["time"] = datetime.fromisoformat(post["time"])
                         except:
                             post["time"] = datetime.now()
-                    parsed_posts.append(post)
-                user_posts[int(user_id)] = parsed_posts
+                    parsed.append(post)
+                user_posts[int(user_id)] = parsed
 
+            print("[DEBUG] 🧠 Загружаем user_daily_posts...")
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
                 user_id = int(user_id)
@@ -1354,48 +1374,33 @@ def restore_data_from_json(json_data):
                     user_daily_posts[user_id][network] = {}
                     for city, post_data in cities.items():
                         parsed_posts = []
-                        for post in post_data.get("posts", []):
+                        for p in post_data.get("posts", []):
                             try:
-                                parsed_posts.append(datetime.fromisoformat(post))
+                                parsed_posts.append(datetime.fromisoformat(p))
                             except:
-                                continue
+                                pass
                         parsed_deleted = []
-                        for post in post_data.get("deleted_posts", []):
+                        for p in post_data.get("deleted_posts", []):
                             try:
-                                parsed_deleted.append(datetime.fromisoformat(post))
+                                parsed_deleted.append(datetime.fromisoformat(p))
                             except:
-                                continue
+                                pass
                         user_daily_posts[user_id][network][city] = {
                             "posts": parsed_posts,
                             "deleted_posts": parsed_deleted
                         }
 
-            # Вернём админов, но безопасно
             admins = [int(a) for a in data.get("admins", [])]
+            print(f"[DEBUG] ✅ Загружено {len(admins)} админов.")
 
+            # 💾 Сохраняем в SQLite
             save_data()
+
+        print("[DEBUG] ✅ Восстановление завершено.")
         return True
-
     except Exception as e:
-        print(f"[ERROR] restore_data_from_json: {e}")
+        print(f"[ERROR] ❌ Ошибка восстановления: {e}")
         return False
-
-def handle_restore_file(message):
-    if not message.document:
-        bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте корректный .json файл.")
-        return
-    try:
-        bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
-        file_info = bot.get_file(message.document.file_id)
-        downloaded = bot.download_file(file_info.file_path)
-        success = restore_data_from_json(downloaded.decode("utf-8"))
-        if success:
-            add_admin_user(message.chat.id)  # вернуть админ-права отправителю
-            bot.send_message(message.chat.id, "✅ Данные успешно восстановлены.")
-        else:
-            bot.send_message(message.chat.id, "❌ Ошибка при восстановлении.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка загрузки файла: {e}")
 
 def schedule_daily_backup():
     def task():
