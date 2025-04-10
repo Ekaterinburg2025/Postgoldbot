@@ -165,10 +165,6 @@ def is_admin(user_id):
     admin_users = load_admin_users()  # Загружаем список администраторов
     return user_id in admin_users  # Проверяем, есть ли пользователь в списке
 
-# Проверка, является ли пользователь администратором
-def is_admin(user_id):
-    return user_id in admins
-
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
     """Считает количество уникальных комбинаций сетей и городов для пользователя."""
