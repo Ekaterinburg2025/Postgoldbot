@@ -335,6 +335,10 @@ def select_duration_for_payment(message, user_id, network, city):
         end_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
         end_date_str = end_date.isoformat()
 
+        # Защита от поломки paid_users
+        if not isinstance(paid_users, dict):
+            paid_users = {}
+
         if user_id not in paid_users:
             paid_users[user_id] = []
 
@@ -360,8 +364,10 @@ def select_duration_for_payment(message, user_id, network, city):
             f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
             f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}"
         )
+
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при добавлении: {e}")
+        print(f"[ERROR] select_duration_for_payment: {e}")
 
 def is_today(dt):
     return dt.date() == datetime.now(ekaterinburg_tz).date()
@@ -450,57 +456,52 @@ def check_payment(user_id, network, city):
 
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
-    """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
     for attempt in range(retries):
         with db_lock:
             try:
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
-                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # ✅ Сохранение оплативших пользователей
+                    # 💾 Оплаченные
                     for user_id, entries in paid_users.items():
                         for entry in entries:
-                            end_date = entry["end_date"]
+                            end_date = entry.get("end_date")
                             if isinstance(end_date, datetime):
-                                end_date_str = end_date.replace(tzinfo=None).isoformat()
+                                end_date_str = end_date.isoformat()
                             elif isinstance(end_date, str):
                                 end_date_str = end_date
                             else:
                                 end_date_str = None
+
+                            if end_date_str is None:
+                                print(f"[SAVE WARNING] Пропущена запись с пустой датой у пользователя {user_id}")
+                                continue  # Пропускаем невалидные записи
 
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], end_date_str))
 
-                    # Сохранение админов
-                    for user_id in admins:
-                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+                    # 💾 Админы
+                    for admin_id in admins:
+                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (admin_id,))
 
-                    # Сохранение публикаций
+                    # 💾 Посты
                     for user_id, posts in user_posts.items():
                         for post in posts:
-                            post_time = post["time"]
-                            if isinstance(post_time, datetime):
-                                post_time_str = post_time.replace(tzinfo=None).isoformat()
-                            else:
-                                post_time_str = post_time
-
+                            time_str = post["time"]
+                            if isinstance(time_str, datetime):
+                                time_str = time_str.isoformat()
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
-                                user_id,
-                                post["network"],
-                                post["city"],
-                                post_time_str,
-                                post["chat_id"],
-                                post["message_id"]
+                                user_id, post["network"], post["city"],
+                                time_str, post["chat_id"], post["message_id"]
                             ))
 
                     conn.commit()
@@ -510,6 +511,7 @@ def save_data(retries=3, delay=0.5):
                     time.sleep(delay)
                     continue
                 else:
+                    print(f"[SAVE ERROR] {e}")
                     break
             except Exception as e:
                 print(f"[SAVE ERROR] {e}")
