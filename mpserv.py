@@ -194,7 +194,7 @@ user_posts = {}
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления")
+    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления", "Моя статистика")
     return markup
 
 def format_time(timestamp):
@@ -725,18 +725,6 @@ def handle_duration_change(call):
     except Exception as e:
         print(f"Ошибка в handle_duration_change: {e}")
 
-def show_statistics(message):
-    if not user_statistics:
-        bot.send_message(message.chat.id, "Нет данных о публикациях.")
-        return
-
-    response = "Статистика публикаций:\n"
-    for user_id, stats in user_statistics.items():
-        user_info = bot.get_chat(user_id)
-        user_name = get_user_name(user_info)
-        response += f"Пользователь {user_name}: {stats['count']} публикаций\n"
-    bot.send_message(message.chat.id, response)
-
 def get_admin_statistics():
     statistics = {}
 
@@ -777,7 +765,8 @@ def get_admin_statistics():
 
 @bot.message_handler(commands=['statistics'])
 def show_statistics(message):
-    if message.chat.id not in admins:
+    if not is_admin(message.chat.id):
+        bot.send_message(message.chat.id, "У вас нет прав для просмотра статистики.")
         return
 
     stats = get_admin_statistics()
@@ -785,19 +774,29 @@ def show_statistics(message):
         bot.send_message(message.chat.id, "Нет данных о публикациях.")
         return
 
-    response = "Статистика публикаций:\n"
+    response = "📊 Статистика публикаций:\n"
     for user_id, user_stats in stats.items():
+        try:
+            user_info = bot.get_chat(user_id)
+            user_name = get_user_name(user_info)
+        except:
+            user_name = f"ID {user_id}"
         response += (
-            f"Пользователь {user_id}:\n"
-            f"  - Опубликовано: {user_stats['published']}\n"
-            f"  - Осталось: {user_stats['remaining']}\n"
-            f"  - Ссылки: {', '.join(user_stats['links'])}\n"
+            f"👤 {user_name}:\n"
+            f"• Опубликовано: {user_stats['published']}\n"
+            f"• Осталось: {user_stats['remaining']}\n"
         )
         if user_stats["details"]:
-            response += "  - Детали по сетям:\n"
+            response += "  • Детали:\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
-                    response += f"    - {network}, {city}: {data['published']} опубликовано, {data['remaining']} осталось\n"
+                    response += f"    - {network}, {city}: {data['published']} / {data['remaining']}\n"
+        if user_stats["links"]:
+            response += "  • Ссылки:\n"
+            for link in user_stats["links"]:
+                response += f"    - {link}\n"
+        response += "\n"
+
     bot.send_message(message.chat.id, response)
 
 # Функция для изменения срока оплаты
@@ -1010,6 +1009,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     # Проверка на наличие оплаты
     if is_user_paid(user_id, selected_network, city):  # Используем проверку оплаты вместо VIP
         # Если оплата есть, продолжаем публикацию
+        signature = network_signatures.get(selected_network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
         networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
