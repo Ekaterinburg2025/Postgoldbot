@@ -250,9 +250,18 @@ def add_paid_user(user_id, network, city, end_date):
 
 def add_admin_user(user_id):
     with db_lock:
+        # Добавляем в список в памяти
         if user_id not in admins:
             admins.append(user_id)
             save_data()
+
+        # Добавляем в SQLite-базу
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+            conn.commit()
+
+    # Уведомление
     if user_id != ADMIN_CHAT_ID:
         bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
     bot.send_message(user_id, "✅ Вы добавлены как администратор.")
@@ -264,14 +273,8 @@ def load_admin_users():
             cur.execute("SELECT user_id FROM admin_users")
             return [row[0] for row in cur.fetchall()]
 
-def add_admin_user(user_id):
-    with db_lock:
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
-            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
-            conn.commit()
-
 def is_admin(user_id):
+    STATIC_ADMINS = [479938867, 7235010425]  # ← добавь свои ID
     return user_id in STATIC_ADMINS or user_id in admins
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
@@ -304,7 +307,7 @@ ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 def select_duration_for_payment(message, user_id, network, city):
     try:
-        global paid_users  # 🔧 добавлено
+        global paid_users, chat_ids_mk, chat_ids_parni, chat_ids_ns, ekaterinburg_tz, ADMIN_CHAT_ID
 
         if message.text == "Назад":
             markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
@@ -334,6 +337,10 @@ def select_duration_for_payment(message, user_id, network, city):
             bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
             return
 
+        if 'ekaterinburg_tz' not in globals():
+            from pytz import timezone
+            ekaterinburg_tz = timezone("Asia/Yekaterinburg")
+
         end_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
         end_date_str = end_date.isoformat()
 
@@ -348,7 +355,6 @@ def select_duration_for_payment(message, user_id, network, city):
 
         save_data()
 
-        # Получаем имя пользователя для отображения
         try:
             user_info = bot.get_chat(user_id)
             user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
@@ -1402,51 +1408,47 @@ def restore_data_from_json(json_data):
         data = json.loads(json_data)
 
         with db_lock:
-            global paid_users, user_posts, user_daily_posts, admins
+            global paid_users, user_posts, user_daily_posts, admins  # обязательно global
 
             # 👤 Оплатившие
-            paid_users = {}
+            temp_paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 uid = int(user_id)
-                paid_users[uid] = []
+                temp_paid_users[uid] = []
                 for entry in entries:
-                    raw_end_date = entry.get("end_date")
-                    end_date = None
-                    if isinstance(raw_end_date, str):
+                    end_date = entry.get("end_date")
+                    if isinstance(end_date, str):
                         try:
-                            end_date = datetime.fromisoformat(raw_end_date)
+                            end_date = datetime.fromisoformat(end_date)
                         except Exception:
                             end_date = None
-                    elif isinstance(raw_end_date, datetime):
-                        end_date = raw_end_date
-                    # ❗ Не добавляем, если дата невалидна
-                    if end_date is None:
-                        continue
-                    paid_users[uid].append({
+                    temp_paid_users[uid].append({
                         "network": entry.get("network"),
                         "city": entry.get("city"),
                         "end_date": end_date
                     })
+            paid_users = temp_paid_users  # теперь точно назначен
 
             # 📨 Посты
-            user_posts = {}
+            temp_user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
                 uid = int(user_id)
-                user_posts[uid] = []
+                temp_user_posts[uid] = []
                 for post in posts:
                     try:
                         post["time"] = datetime.fromisoformat(post["time"])
                     except Exception:
                         post["time"] = datetime.now()
-                    user_posts[uid].append(post)
+                    temp_user_posts[uid].append(post)
+            user_posts = temp_user_posts
 
             # 📊 Лимиты
-            user_daily_posts = {}
+            temp_user_daily = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
                 uid = int(user_id)
-                user_daily_posts[uid] = {}
+                temp_user_daily[uid] = {}
                 for network, cities in networks.items():
-                    user_daily_posts[uid][network] = {}
+                    temp_user_daily[uid][network] = {}
                     for city, post_data in cities.items():
                         posts = []
                         deleted = []
@@ -1460,10 +1462,11 @@ def restore_data_from_json(json_data):
                                 deleted.append(datetime.fromisoformat(d))
                             except:
                                 continue
-                        user_daily_posts[uid][network][city] = {
+                        temp_user_daily[uid][network][city] = {
                             "posts": posts,
                             "deleted_posts": deleted
                         }
+            user_daily_posts = temp_user_daily
 
             # 🛡 Админы
             admins = [int(a) for a in data.get("admins", [])]
