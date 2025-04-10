@@ -338,31 +338,35 @@ def select_duration_for_payment(message, user_id, network, city):
 
 def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
-    if user_id in user_daily_posts:
-        limit_total = 0  # общий лимит по всем активным доступам
+    limit_total = 0
 
-        for network, cities in user_daily_posts[user_id].items():
+    # Получаем все активные оплаты пользователя
+    active_access = []
+    for access in paid_users.get(user_id, []):
+        if access["end_date"] and access["end_date"] >= datetime.now():
+            active_access.append((access["network"], access["city"]))
+
+    # Строим user_daily_posts при необходимости (или просто считаем лимит)
+    for network, city in active_access:
+        if user_id in user_daily_posts and network in user_daily_posts[user_id] and city in user_daily_posts[user_id][network]:
+            post_data = user_daily_posts[user_id][network][city]
+            active_posts = len(post_data.get("posts", []))
+            deleted_posts = len(post_data.get("deleted_posts", []))
+            total_posts = active_posts + deleted_posts
+        else:
+            total_posts = 0
+
+        limit_total += 3
+        if network not in stats["details"]:
             stats["details"][network] = {}
-            for city, post_data in cities.items():
-                # проверим, есть ли активный доступ
-                if not is_user_paid(user_id, network, city):
-                    continue  # пропускаем неактивные
 
-                active_posts = len(post_data.get("posts", []))
-                deleted_posts = len(post_data.get("deleted_posts", []))
-                total_posts = active_posts + deleted_posts
+        stats["details"][network][city] = {
+            "published": total_posts,
+            "remaining": max(0, 3 - total_posts)
+        }
+        stats["published"] += total_posts
 
-                limit_total += 3  # Только если доступ активен
-
-                stats["details"][network][city] = {
-                    "published": total_posts,
-                    "remaining": max(0, 3 - total_posts)
-                }
-
-                stats["published"] += total_posts
-
-        stats["remaining"] = max(0, limit_total - stats["published"])
-
+    stats["remaining"] = max(0, limit_total - stats["published"])
     return stats
 
 def is_today(timestamp):
