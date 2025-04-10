@@ -1338,74 +1338,71 @@ def restore_data_from_json(json_data):
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
-            # Загружаем данные из JSON
+            # 👤 Оплатившие
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
-                paid_users[int(user_id)] = []
+                uid = int(user_id)
+                paid_users[uid] = []
                 for entry in entries:
                     end_date = entry.get("end_date")
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
-                        except Exception as e:
-                            print(f"[!] Ошибка парсинга end_date: {e}")
+                        except Exception:
                             end_date = None
-                    paid_users[int(user_id)].append({
-                        "network": entry["network"],
-                        "city": entry["city"],
+                    paid_users[uid].append({
+                        "network": entry.get("network"),
+                        "city": entry.get("city"),
                         "end_date": end_date
                     })
 
+            # 📨 Посты
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
-                user_posts[int(user_id)] = []
+                uid = int(user_id)
+                user_posts[uid] = []
                 for post in posts:
                     try:
                         post["time"] = datetime.fromisoformat(post["time"])
-                    except:
+                    except Exception:
                         post["time"] = datetime.now()
-                    user_posts[int(user_id)].append(post)
+                    user_posts[uid].append(post)
 
+            # 📊 Лимиты
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
-                user_daily_posts[int(user_id)] = {}
+                uid = int(user_id)
+                user_daily_posts[uid] = {}
                 for network, cities in networks.items():
-                    user_daily_posts[int(user_id)][network] = {}
-                    for city, values in cities.items():
-                        try:
-                            parsed_posts = [datetime.fromisoformat(p) for p in values.get("posts", [])]
-                        except:
-                            parsed_posts = []
-                        try:
-                            parsed_deleted = [datetime.fromisoformat(p) for p in values.get("deleted_posts", [])]
-                        except:
-                            parsed_deleted = []
-                        user_daily_posts[int(user_id)][network][city] = {
-                            "posts": parsed_posts,
-                            "deleted_posts": parsed_deleted
+                    user_daily_posts[uid][network] = {}
+                    for city, post_data in cities.items():
+                        posts = []
+                        deleted = []
+                        for p in post_data.get("posts", []):
+                            try:
+                                posts.append(datetime.fromisoformat(p))
+                            except:
+                                continue
+                        for d in post_data.get("deleted_posts", []):
+                            try:
+                                deleted.append(datetime.fromisoformat(d))
+                            except:
+                                continue
+                        user_daily_posts[uid][network][city] = {
+                            "posts": posts,
+                            "deleted_posts": deleted
                         }
 
-            # Обновляем админов
+            # 🛡 Админы
             admins = [int(a) for a in data.get("admins", [])]
-            if ADMIN_CHAT_ID not in admins:
-                admins.append(ADMIN_CHAT_ID)
-
-            # Сохраняем в SQLite: admins
-            try:
-                with sqlite3.connect("bot_data.db") as conn:
-                    cur = conn.cursor()
-                    cur.execute("DELETE FROM admin_users")
-                    for admin_id in admins:
-                        cur.execute("INSERT INTO admin_users (user_id) VALUES (?)", (admin_id,))
-                    conn.commit()
-            except Exception as db_error:
-                print(f"[ERROR] Не удалось обновить admin_users в базе: {db_error}")
 
             save_data()
-
+        bot.send_message(ADMIN_CHAT_ID, "✅ Восстановление завершено успешно.")
         return True
+
     except Exception as e:
-        print(f"[ERROR] restore_data_from_json: {e}")
+        bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка восстановления: {e}")
+        print(f"[RESTORE ERROR] {e}")
         return False
 
 def schedule_daily_backup():
