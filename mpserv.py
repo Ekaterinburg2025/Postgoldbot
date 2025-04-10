@@ -425,26 +425,29 @@ def check_payment(user_id, network, city):
         return False
 
     for payment in paid_users[user_id]:
+        # Получаем дату окончания
         end_date = payment.get("end_date")
 
-        # Безопасная проверка срока действия
+        # Преобразуем в datetime, если строка
         if isinstance(end_date, str):
             try:
                 end_date = datetime.fromisoformat(end_date)
             except Exception:
-                end_date = None
+                print(f"[WARN] Невозможно разобрать дату: {payment.get('end_date')}")
+                continue
 
-        if not isinstance(end_date, datetime) or end_date < datetime.now(ekaterinburg_tz):
-            print(f"[DEBUG] Срок оплаты истёк или дата некорректна: {payment}")
+        # Пропускаем истёкшие записи
+        if not end_date or end_date < datetime.now(ekaterinburg_tz):
+            print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
             continue
 
         # Если оплачен доступ ко всем сетям для этого города
-        if payment["network"] == "Все сети" and payment["city"] == city:
+        if payment.get("network") == "Все сети" and payment.get("city") == city:
             print(f"[DEBUG] Пользователь {user_id} оплатил доступ ко всем сетям для города {city}.")
             return True
 
         # Если оплачен доступ к конкретной сети и городу
-        if payment["network"] == network and payment["city"] == city:
+        if payment.get("network") == network and payment.get("city") == city:
             print(f"[DEBUG] Пользователь {user_id} оплатил доступ к сети {network} для города {city}.")
             return True
 
@@ -470,7 +473,7 @@ def save_data(retries=3, delay=0.5):
                         for entry in entries:
                             end_date = entry["end_date"]
                             if isinstance(end_date, datetime):
-                                end_date_str = end_date.isoformat()
+                                end_date_str = end_date.replace(tzinfo=None).isoformat()
                             elif isinstance(end_date, str):
                                 end_date_str = end_date
                             else:
@@ -488,6 +491,12 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
+                            post_time = post["time"]
+                            if isinstance(post_time, datetime):
+                                post_time_str = post_time.replace(tzinfo=None).isoformat()
+                            else:
+                                post_time_str = post_time
+
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -495,7 +504,7 @@ def save_data(retries=3, delay=0.5):
                                 user_id,
                                 post["network"],
                                 post["city"],
-                                post["time"].isoformat() if isinstance(post["time"], datetime) else post["time"],
+                                post_time_str,
                                 post["chat_id"],
                                 post["message_id"]
                             ))
@@ -511,7 +520,6 @@ def save_data(retries=3, delay=0.5):
             except Exception as e:
                 print(f"[SAVE ERROR] {e}")
                 break
-    # Не удалось сохранить после всех попыток
 
 def save_backup_to_json():
     with db_lock:
@@ -522,7 +530,7 @@ def save_backup_to_json():
             for entry in entries:
                 end_date = entry.get("end_date")
                 if isinstance(end_date, datetime):
-                    end_date = end_date.isoformat()
+                    end_date = end_date.replace(tzinfo=None).isoformat()
                 safe_paid_users[user_id].append({
                     "network": entry.get("network"),
                     "city": entry.get("city"),
@@ -536,7 +544,7 @@ def save_backup_to_json():
             for post in posts:
                 post_copy = post.copy()
                 if isinstance(post_copy.get("time"), datetime):
-                    post_copy["time"] = post_copy["time"].isoformat()
+                    post_copy["time"] = post_copy["time"].replace(tzinfo=None).isoformat()
                 safe_user_posts[user_id].append(post_copy)
 
         # Подготовка user_daily_posts
@@ -547,8 +555,8 @@ def save_backup_to_json():
                 safe_daily[user_id][network] = {}
                 for city, data in cities.items():
                     safe_daily[user_id][network][city] = {
-                        "posts": [p.isoformat() for p in data.get("posts", [])],
-                        "deleted_posts": [d.isoformat() for d in data.get("deleted_posts", [])]
+                        "posts": [p.replace(tzinfo=None).isoformat() for p in data.get("posts", [])],
+                        "deleted_posts": [d.replace(tzinfo=None).isoformat() for d in data.get("deleted_posts", [])]
                     }
 
         # Объединяем всё
