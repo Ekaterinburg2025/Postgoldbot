@@ -1335,6 +1335,7 @@ def restore_data_from_json(json_data):
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
+            # Загружаем данные из JSON
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 paid_users[int(user_id)] = []
@@ -1381,9 +1382,21 @@ def restore_data_from_json(json_data):
                             "deleted_posts": parsed_deleted
                         }
 
+            # Обновляем админов
             admins = [int(a) for a in data.get("admins", [])]
-            if 479938867 not in admins:
-                admins.append(479938867)
+            if ADMIN_CHAT_ID not in admins:
+                admins.append(ADMIN_CHAT_ID)
+
+            # Сохраняем в SQLite: admins
+            try:
+                with sqlite3.connect("bot_data.db") as conn:
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM admin_users")
+                    for admin_id in admins:
+                        cur.execute("INSERT INTO admin_users (user_id) VALUES (?)", (admin_id,))
+                    conn.commit()
+            except Exception as db_error:
+                print(f"[ERROR] Не удалось обновить admin_users в базе: {db_error}")
 
             save_data()
 
