@@ -579,7 +579,7 @@ def is_user_paid(user_id, network, city):
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if not is_admin(message.chat.id):
-        bot.send_message(message.chat.id, " У вас нет прав для выполнения этой команда.")
+        bot.send_message(message.chat.id, " У вас нет прав для выполнения этой команды.")
         return
 
     markup = types.InlineKeyboardMarkup()
@@ -1120,5 +1120,6 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
+    add_admin_user(479938867)  # Только один раз!
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
