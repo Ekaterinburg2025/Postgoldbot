@@ -1313,63 +1313,43 @@ def handle_restore_start(message):
 
 def restore_data_from_json(json_data):
     try:
-        bot.send_message(ADMIN_CHAT_ID, "📥 Начинаю восстановление данных...")
         data = json.loads(json_data)
 
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
-            paid_users = {}
-            for user_id, entries in data.get("paid_users", {}).items():
-                paid_users[int(user_id)] = []
-                for entry in entries:
-                    end_date = entry.get("end_date")
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except:
-                            end_date = None
-                    paid_users[int(user_id)].append({
-                        "network": entry["network"],
-                        "city": entry["city"],
-                        "end_date": end_date
-                    })
-
-            user_posts = {}
-            for user_id, posts in data.get("user_posts", {}).items():
-                user_posts[int(user_id)] = posts
-
+            # Парсим и восстанавливаем данные
+            paid_users = {int(uid): entries for uid, entries in data.get("paid_users", {}).items()}
+            user_posts = {int(uid): posts for uid, posts in data.get("user_posts", {}).items()}
             user_daily_posts = {}
-            for user_id, networks in data.get("user_daily_posts", {}).items():
-                user_id = int(user_id)
+            for uid, networks in data.get("user_daily_posts", {}).items():
+                user_id = int(uid)
                 user_daily_posts[user_id] = {}
                 for network, cities in networks.items():
                     user_daily_posts[user_id][network] = {}
-                    for city, posts in cities.items():
-                        parsed_posts = []
-                        for post in posts.get("posts", []):
-                            try:
-                                parsed_posts.append(datetime.fromisoformat(post))
-                            except:
-                                continue
-                        parsed_deleted = []
-                        for post in posts.get("deleted_posts", []):
-                            try:
-                                parsed_deleted.append(datetime.fromisoformat(post))
-                            except:
-                                continue
+                    for city, post_data in cities.items():
                         user_daily_posts[user_id][network][city] = {
-                            "posts": parsed_posts,
-                            "deleted_posts": parsed_deleted
+                            "posts": [datetime.fromisoformat(p) for p in post_data.get("posts", [])],
+                            "deleted_posts": [datetime.fromisoformat(p) for p in post_data.get("deleted_posts", [])],
                         }
 
-            admins = [int(a) for a in data.get("admins", [])]
+            admins = [int(uid) for uid in data.get("admins", [])]
+            if not admins:
+                admins.append(479938867)  # Твой ID
+
+            # Преобразуем строки в datetime в paid_users
+            for entries in paid_users.values():
+                for entry in entries:
+                    if isinstance(entry["end_date"], str):
+                        try:
+                            entry["end_date"] = datetime.fromisoformat(entry["end_date"])
+                        except:
+                            entry["end_date"] = None
 
             save_data()
-        bot.send_message(ADMIN_CHAT_ID, "✅ Восстановление завершено успешно.")
         return True
     except Exception as e:
-        bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка восстановления: {e}")
+        print(f"[ERROR] restore_data_from_json: {e}")
         return False
 
 def handle_restore_file(message):
