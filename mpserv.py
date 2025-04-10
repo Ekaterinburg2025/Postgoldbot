@@ -787,14 +787,14 @@ def show_statistics(message):
             response += "  • Детали:\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
-                    # Добавим срок оплаты
+                    # Защищённый способ получения срока оплаты
                     end_date = None
                     for paid in paid_users.get(user_id, []):
                         if (
-                            (paid["network"] == network and paid["city"] == city) or
-                            (paid["network"] == "Все сети" and paid["city"] == city)
+                            (paid.get("network") == network and paid.get("city") == city) or
+                            (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date = paid["end_date"]
+                            end_date = paid.get("end_date")
                             break
 
                     if isinstance(end_date, str):
