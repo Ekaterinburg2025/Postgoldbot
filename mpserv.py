@@ -1110,12 +1110,26 @@ def handle_stats_button(message):
             f"• Опубликовано сегодня: {stats['published']}\n"
             f"• Осталось публикаций: {stats['remaining']}\n"
         )
+
         if stats["details"]:
             response += "\n📍 Детали по сетям:\n"
             for network, cities in stats["details"].items():
                 for city, data in cities.items():
-                    response += f"  └ {network}, {city}: {data['published']} опубликовано, {data['remaining']} осталось\n"
+                    # Получаем дату окончания подписки
+                    end_date = None
+                    for paid in paid_users.get(message.from_user.id, []):
+                        if paid["network"] == network and paid["city"] == city:
+                            end_date = paid["end_date"]
+                            break
+
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
+                    response += (
+                        f"  └ {network}, {city} {expire_str}: "
+                        f"{data['published']} опубликовано, {data['remaining']} осталось\n"
+                    )
+
         bot.send_message(message.chat.id, response)
+
     except Exception as e:
         print(f"[ERROR] Ошибка при показе статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики.")
@@ -1123,6 +1137,7 @@ def handle_stats_button(message):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
 def handle_admin_statistics(call):
     try:
+        print("[DEBUG] Нажата кнопка admin_statistics")  # временно
         show_statistics(call.message)
     except Exception as e:
         bot.answer_callback_query(call.id, "Произошла ошибка при показе статистики.")
