@@ -332,20 +332,14 @@ def select_duration_for_payment(message, user_id, network, city):
             bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
             return
 
-        # Убедимся, что tz определён
-        if 'ekaterinburg_tz' not in globals():
-            from pytz import timezone
-            global ekaterinburg_tz
-            ekaterinburg_tz = timezone("Asia/Yekaterinburg")
-
-        expiry_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
-        expiry_str = expiry_date.isoformat()
+        end_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
+        end_date_str = end_date.isoformat()
 
         if user_id not in paid_users:
             paid_users[user_id] = []
 
         paid_users[user_id].append({
-            "end_date": expiry_str,
+            "end_date": end_date_str,
             "network": network,
             "city": city
         })
@@ -364,12 +358,10 @@ def select_duration_for_payment(message, user_id, network, city):
         bot.send_message(
             ADMIN_CHAT_ID,
             f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
-            f"📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+            f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}"
         )
-
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка добавления пользователя: {e}")
-        print(f"[ERROR in select_duration_for_payment] {e}")
+        bot.send_message(message.chat.id, f"❌ Ошибка при добавлении: {e}")
 
 def is_today(dt):
     return dt.date() == datetime.now(ekaterinburg_tz).date()
@@ -428,15 +420,22 @@ def is_today(timestamp):
 
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
-    if str(user_id) not in paid_users:
+    if user_id not in paid_users:
         print(f"[DEBUG] Пользователь {user_id} не найден в оплативших.")
         return False
 
-    for payment in paid_users[str(user_id)]:
-        # Проверяем, не истёк ли срок оплаты
-        if payment["expiry_date"] < datetime.now(ekaterinburg_tz):
+    for payment in paid_users[user_id]:
+        end_date = payment.get("end_date")
+
+        if isinstance(end_date, str):
+            try:
+                end_date = datetime.fromisoformat(end_date)
+            except:
+                end_date = None
+
+        if not end_date or end_date < datetime.now(ekaterinburg_tz):
             print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
-            continue  # Пропускаем истёкшие платежи
+            continue
 
         # Если оплачен доступ ко всем сетям для этого города
         if payment["network"] == "Все сети" and payment["city"] == city:
