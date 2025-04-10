@@ -1392,17 +1392,18 @@ def restore_data_from_json(json_data):
 
             # 👤 Оплатившие
             paid_users = {}
-            for user_id, entries in data.get("paid_users", {}).items():
-                uid = int(user_id)
-                paid_users[uid] = []
+            for user_id_str, entries in data.get("paid_users", {}).items():
+                user_id = int(user_id_str)
+                paid_users[user_id] = []
                 for entry in entries:
                     end_date = entry.get("end_date")
                     if isinstance(end_date, str):
                         try:
                             end_date = datetime.fromisoformat(end_date)
                         except Exception:
+                            print(f"[WARN] Некорректная дата у пользователя {user_id}: {end_date}")
                             end_date = None
-                    paid_users[uid].append({
+                    paid_users[user_id].append({
                         "network": entry.get("network"),
                         "city": entry.get("city"),
                         "end_date": end_date
@@ -1410,26 +1411,26 @@ def restore_data_from_json(json_data):
 
             # 📨 Посты
             user_posts = {}
-            for user_id, posts in data.get("user_posts", {}).items():
-                uid = int(user_id)
-                user_posts[uid] = []
+            for user_id_str, posts in data.get("user_posts", {}).items():
+                user_id = int(user_id_str)
+                user_posts[user_id] = []
                 for post in posts:
                     try:
                         post["time"] = datetime.fromisoformat(post["time"])
                     except Exception:
                         post["time"] = datetime.now()
-                    user_posts[uid].append(post)
+                    user_posts[user_id].append(post)
 
             # 📊 Лимиты
             user_daily_posts = {}
-            for user_id, networks in data.get("user_daily_posts", {}).items():
-                uid = int(user_id)
-                user_daily_posts[uid] = {}
+            for user_id_str, networks in data.get("user_daily_posts", {}).items():
+                user_id = int(user_id_str)
+                user_daily_posts[user_id] = {}
                 for network, cities in networks.items():
-                    user_daily_posts[uid][network] = {}
+                    user_daily_posts[user_id][network] = {}
                     for city, post_data in cities.items():
                         posts = []
-                        deleted = []
+                        deleted_posts = []
                         for p in post_data.get("posts", []):
                             try:
                                 posts.append(datetime.fromisoformat(p))
@@ -1437,15 +1438,15 @@ def restore_data_from_json(json_data):
                                 continue
                         for d in post_data.get("deleted_posts", []):
                             try:
-                                deleted.append(datetime.fromisoformat(d))
+                                deleted_posts.append(datetime.fromisoformat(d))
                             except:
                                 continue
-                        user_daily_posts[uid][network][city] = {
+                        user_daily_posts[user_id][network][city] = {
                             "posts": posts,
-                            "deleted_posts": deleted
+                            "deleted_posts": deleted_posts
                         }
 
-            # 🛡 Админы (временные, не перезаписывают STATIC_ADMINS)
+            # 🛡 Админы
             admins = [int(a) for a in data.get("admins", [])]
 
             save_data()
