@@ -1052,6 +1052,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         # Проверка оплаты
         if is_user_paid(user_id, selected_network, city):
+            signature = network_signatures.get(selected_network, "")
             full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
             networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
