@@ -1042,74 +1042,81 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
 
-    # Проверка лимита по конкретному городу и сети
-    user_stats = get_user_statistics(user_id)
-    city_stats = user_stats.get("details", {}).get(selected_network, {}).get(city, {})
-    if city_stats.get("remaining", 0) <= 0:
-        bot.send_message(message.chat.id, "⛔ Вы исчерпали лимит публикаций в этом городе на сегодня.")
-        return
+    try:
+        # Проверка лимита по конкретному городу и сети
+        user_stats = get_user_statistics(user_id)
+        city_stats = user_stats.get("details", {}).get(selected_network, {}).get(city, {})
+        if city_stats.get("remaining", 0) <= 0:
+            bot.send_message(message.chat.id, "⛔ Вы исчерпали лимит публикаций в этом городе на сегодня.")
+            return
 
-    # Проверка на наличие оплаты
-    if is_user_paid(user_id, selected_network, city):
-        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
-        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+        # Проверка оплаты
+        if is_user_paid(user_id, selected_network, city):
+            full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+            networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
-        for network in networks:
-            if network == "Мужской Клуб":
-                chat_dict = chat_ids_mk
-            elif network == "ПАРНИ 18+":
-                chat_dict = chat_ids_parni
-            elif network == "НС":
-                chat_dict = chat_ids_ns
-            else:
-                continue
+            for network in networks:
+                if network == "Мужской Клуб":
+                    chat_dict = chat_ids_mk
+                elif network == "ПАРНИ 18+":
+                    chat_dict = chat_ids_parni
+                elif network == "НС":
+                    chat_dict = chat_ids_ns
+                else:
+                    continue
 
-            if network == "НС":
-                if city not in chat_dict and city in ns_city_substitution:
-                    substitute_city = ns_city_substitution[city]
-                    if substitute_city in chat_dict:
-                        chat_id = chat_dict[substitute_city]
+                # Обработка подмены города для НС
+                if network == "НС":
+                    if city not in chat_dict and city in ns_city_substitution:
+                        substitute_city = ns_city_substitution[city]
+                        if substitute_city in chat_dict:
+                            chat_id = chat_dict[substitute_city]
+                        else:
+                            bot.send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
+                            continue
+                    elif city in chat_dict:
+                        chat_id = chat_dict[city]
                     else:
                         bot.send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
                         continue
-                elif city in chat_dict:
-                    chat_id = chat_dict[city]
                 else:
-                    bot.send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
-                    continue
-            else:
-                if city in chat_dict:
-                    chat_id = chat_dict[city]
-                else:
-                    bot.send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
-                    continue
+                    if city in chat_dict:
+                        chat_id = chat_dict[city]
+                    else:
+                        bot.send_message(message.chat.id, f"❌ Ошибка! Город '{city}' не найден в сети «{network}».")
+                        continue
 
-            try:
-                if media_type == "photo":
-                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="Markdown")
-                elif media_type == "video":
-                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="Markdown")
-                else:
-                    sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
+                # Отправка поста
+                try:
+                    if media_type == "photo":
+                        sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                    elif media_type == "video":
+                        sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                    else:
+                        sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
 
-                if message.chat.id not in user_posts:
-                    user_posts[message.chat.id] = []
-                user_posts[message.chat.id].append({
-                    "message_id": sent_message.message_id,
-                    "chat_id": chat_id,
-                    "time": datetime.now(),
-                    "city": city,
-                    "network": network
-                })
-                bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
-            except telebot.apihelper.ApiTelegramException as e:
-                bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
+                    if message.chat.id not in user_posts:
+                        user_posts[message.chat.id] = []
+                    user_posts[message.chat.id].append({
+                        "message_id": sent_message.message_id,
+                        "chat_id": chat_id,
+                        "time": datetime.now(),
+                        "city": city,
+                        "network": network
+                    })
 
-        ask_for_new_post(message)
-    else:
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
+                    bot.send_message(message.chat.id, f"✅ Ваше объявление опубликовано в сети «{network}», городе {city}.")
+                except Exception as e:
+                    bot.send_message(message.chat.id, f"❌ Ошибка при отправке поста: {e}")
+
+            ask_for_new_post(message)
+        else:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
+            bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Произошла ошибка при обработке публикации: {e}")
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
