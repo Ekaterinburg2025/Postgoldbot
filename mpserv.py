@@ -501,13 +501,51 @@ def save_data(retries=3, delay=0.5):
 
 def save_backup_to_json():
     with db_lock:
+        # Подготовка paid_users
+        safe_paid_users = {}
+        for user_id, entries in paid_users.items():
+            safe_paid_users[user_id] = []
+            for entry in entries:
+                end_date = entry.get("end_date")
+                if isinstance(end_date, datetime):
+                    end_date = end_date.isoformat()
+                safe_paid_users[user_id].append({
+                    "network": entry.get("network"),
+                    "city": entry.get("city"),
+                    "end_date": end_date
+                })
+
+        # Подготовка user_posts
+        safe_user_posts = {}
+        for user_id, posts in user_posts.items():
+            safe_user_posts[user_id] = []
+            for post in posts:
+                post_copy = post.copy()
+                if isinstance(post_copy.get("time"), datetime):
+                    post_copy["time"] = post_copy["time"].isoformat()
+                safe_user_posts[user_id].append(post_copy)
+
+        # Подготовка user_daily_posts
+        safe_daily = {}
+        for user_id, networks in user_daily_posts.items():
+            safe_daily[user_id] = {}
+            for network, cities in networks.items():
+                safe_daily[user_id][network] = {}
+                for city, data in cities.items():
+                    safe_daily[user_id][network][city] = {
+                        "posts": [p.isoformat() for p in data.get("posts", [])],
+                        "deleted_posts": [d.isoformat() for d in data.get("deleted_posts", [])]
+                    }
+
+        # Объединяем всё
         data = {
-            "paid_users": paid_users,
-            "user_posts": user_posts,
-            "user_daily_posts": user_daily_posts,
+            "paid_users": safe_paid_users,
+            "user_posts": safe_user_posts,
+            "user_daily_posts": safe_daily,
             "admins": admins
         }
-        json_data = json.dumps(data, default=str, indent=2)
+
+        json_data = json.dumps(data, indent=2)
         return BytesIO(json_data.encode("utf-8"))
 
 @bot.message_handler(commands=['start'])
@@ -1407,7 +1445,7 @@ def restore_data_from_json(json_data):
                             "deleted_posts": deleted
                         }
 
-            # 🛡 Админы (временные, сохраняются, но STATIC_ADMINS всегда работает)
+            # 🛡 Админы (временные, не перезаписывают STATIC_ADMINS)
             admins = [int(a) for a in data.get("admins", [])]
 
             save_data()
