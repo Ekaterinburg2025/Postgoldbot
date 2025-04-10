@@ -896,14 +896,15 @@ def handle_duration_change(call):
 
         # Обновляем срок оплаты для всех записей пользователя
         for entry in paid_users[user_id]:
-            end_date = entry["end_date"]
-            end_date = entry["end_date"]
+            end_date = entry.get("end_date")
             if isinstance(end_date, str):
                 try:
-                end_date = datetime.fromisoformat(end_date)
+                    end_date = datetime.fromisoformat(end_date)
                 except:
                     end_date = None
-            entry["end_date"] = end_date + timedelta(days=days)
+
+            if isinstance(end_date, datetime):
+                entry["end_date"] = end_date + timedelta(days=days)
 
         # Сохраняем изменения
         save_data()
