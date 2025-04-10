@@ -1329,13 +1329,12 @@ def handle_restore_file(message):
 
 def restore_data_from_json(json_data):
     try:
-        print("[DEBUG] 🔄 Начинаю разбор JSON...")
         data = json.loads(json_data)
 
         with db_lock:
             global paid_users, user_posts, user_daily_posts, admins
 
-            print("[DEBUG] 🧠 Загружаем paid_users...")
+            # 🔹 Восстановление paid_users
             paid_users = {}
             for user_id, entries in data.get("paid_users", {}).items():
                 paid_users[int(user_id)] = []
@@ -1352,54 +1351,55 @@ def restore_data_from_json(json_data):
                         "end_date": end_date
                     })
 
-            print("[DEBUG] 🧠 Загружаем user_posts...")
+            # 🔹 Восстановление user_posts
             user_posts = {}
             for user_id, posts in data.get("user_posts", {}).items():
-                parsed = []
+                user_posts[int(user_id)] = []
                 for post in posts:
-                    if isinstance(post.get("time"), str):
-                        try:
+                    try:
+                        if isinstance(post.get("time"), str):
                             post["time"] = datetime.fromisoformat(post["time"])
-                        except:
-                            post["time"] = datetime.now()
-                    parsed.append(post)
-                user_posts[int(user_id)] = parsed
+                    except Exception as e:
+                        print(f"[WARN] Ошибка парсинга времени в user_posts: {e}")
+                        post["time"] = datetime.now(ekaterinburg_tz)
+                    user_posts[int(user_id)].append(post)
 
-            print("[DEBUG] 🧠 Загружаем user_daily_posts...")
+            # 🔹 Восстановление user_daily_posts
             user_daily_posts = {}
             for user_id, networks in data.get("user_daily_posts", {}).items():
                 user_id = int(user_id)
                 user_daily_posts[user_id] = {}
                 for network, cities in networks.items():
                     user_daily_posts[user_id][network] = {}
-                    for city, post_data in cities.items():
+                    for city, posts in cities.items():
                         parsed_posts = []
-                        for p in post_data.get("posts", []):
+                        for post in posts.get("posts", []):
                             try:
-                                parsed_posts.append(datetime.fromisoformat(p))
+                                parsed_posts.append(datetime.fromisoformat(post))
                             except:
-                                pass
+                                continue
                         parsed_deleted = []
-                        for p in post_data.get("deleted_posts", []):
+                        for post in posts.get("deleted_posts", []):
                             try:
-                                parsed_deleted.append(datetime.fromisoformat(p))
+                                parsed_deleted.append(datetime.fromisoformat(post))
                             except:
-                                pass
+                                continue
                         user_daily_posts[user_id][network][city] = {
                             "posts": parsed_posts,
                             "deleted_posts": parsed_deleted
                         }
 
-            admins = [int(a) for a in data.get("admins", [])]
-            print(f"[DEBUG] ✅ Загружено {len(admins)} админов.")
+            # 🔹 Восстановление админов (❗ не забываем оставить текущих)
+            current_admins = set(admins)  # сохранить уже назначенных
+            new_admins = {int(a) for a in data.get("admins", [])}
+            admins = list(current_admins.union(new_admins))
 
-            # 💾 Сохраняем в SQLite
             save_data()
 
-        print("[DEBUG] ✅ Восстановление завершено.")
         return True
+
     except Exception as e:
-        print(f"[ERROR] ❌ Ошибка восстановления: {e}")
+        print(f"[ERROR] restore_data_from_json: {e}")
         return False
 
 def schedule_daily_backup():
