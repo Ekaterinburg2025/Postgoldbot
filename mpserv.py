@@ -304,6 +304,8 @@ ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 def select_duration_for_payment(message, user_id, network, city):
     try:
+        global paid_users  # 🔧 добавлено
+
         if message.text == "Назад":
             markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
             if network == "Мужской Клуб":
@@ -335,10 +337,6 @@ def select_duration_for_payment(message, user_id, network, city):
         end_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
         end_date_str = end_date.isoformat()
 
-        # Защита от поломки paid_users
-        if not isinstance(paid_users, dict):
-            paid_users = {}
-
         if user_id not in paid_users:
             paid_users[user_id] = []
 
@@ -364,10 +362,8 @@ def select_duration_for_payment(message, user_id, network, city):
             f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
             f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}"
         )
-
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при добавлении: {e}")
-        print(f"[ERROR] select_duration_for_payment: {e}")
 
 def is_today(dt):
     return dt.date() == datetime.now(ekaterinburg_tz).date()
