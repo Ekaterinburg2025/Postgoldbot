@@ -10,6 +10,7 @@ from collections import defaultdict
 
 import pytz
 from pytz import timezone
+ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 import telebot
 from telebot import types
@@ -299,6 +300,10 @@ def is_today(post_time):
     return post_time.date() == datetime.now(ekaterinburg_tz).date()
 
 # Функция для выбора срока оплаты
+from pytz import timezone
+
+ekaterinburg_tz = timezone('Asia/Yekaterinburg')
+
 def select_duration_for_payment(message, user_id, network, city):
     if message.text == "Назад":
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
@@ -308,6 +313,8 @@ def select_duration_for_payment(message, user_id, network, city):
             cities = list(chat_ids_parni.keys())
         elif network == "НС":
             cities = list(chat_ids_ns.keys())
+        else:
+            cities = []
         markup.add(*cities)
         markup.add("Назад")
         bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
@@ -336,21 +343,22 @@ def select_duration_for_payment(message, user_id, network, city):
         "network": network,
         "city": city
     })
+
     save_data()
 
-    # Получаем имя пользователя для админа
+    # Получаем имя пользователя для отображения
     try:
         user_info = bot.get_chat(user_id)
         user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
         if not user_name:
             user_name = user_info.username or "Имя не указано"
-    except Exception as e:
+    except Exception:
         user_name = "Имя не найдено"
 
-    # Уведомление админу
     bot.send_message(
         ADMIN_CHAT_ID,
-        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
+        f"📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
     )
 
 def is_today(dt):
