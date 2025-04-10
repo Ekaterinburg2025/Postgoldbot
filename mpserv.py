@@ -691,16 +691,6 @@ def get_admin_statistics():
         stats["remaining"] = max(0, limit_total - stats["published"])
         statistics[user_id] = stats
 
-    return statistics
-
-        # Ссылки на активные посты (если нужны)
-        if user_id in user_posts:
-            for post in user_posts[user_id]:
-                if is_today(post["time"]):
-                    stats["links"].append(f"https://t.me/c/{str(post['chat_id'])[4:]}/{post['message_id']}")
-
-        statistics[user_id] = stats
-
     print(f"[DEBUG] Статистика для админа: {statistics}")
     return statistics
 
