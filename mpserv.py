@@ -839,7 +839,7 @@ def get_admin_statistics():
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
-        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
+        bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
         return
 
     stats = get_admin_statistics()
@@ -867,16 +867,19 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date = paid.get("end_date")
+                            end_date_raw = paid.get("end_date")
+                            if isinstance(end_date_raw, str):
+                                try:
+                                    end_date = datetime.fromisoformat(end_date_raw)
+                                except:
+                                    end_date = None
+                            elif isinstance(end_date_raw, datetime):
+                                end_date = end_date_raw
                             break
 
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except:
-                            end_date = None
-
+                    # 🛡 Безопасное форматирование даты
                     expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
+
                     response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
 
         if user_stats["links"]:
