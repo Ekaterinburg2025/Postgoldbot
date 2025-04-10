@@ -340,13 +340,17 @@ def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
     limit_total = 0
 
-    # Получаем все активные оплаты пользователя
     active_access = []
     for access in paid_users.get(user_id, []):
-        if access["end_date"] and access["end_date"] >= datetime.now():
+        end_date = access.get("end_date")
+        if isinstance(end_date, str):
+            try:
+                end_date = datetime.fromisoformat(end_date)
+            except:
+                end_date = None
+        if end_date and end_date >= datetime.now():
             active_access.append((access["network"], access["city"]))
 
-    # Строим user_daily_posts при необходимости (или просто считаем лимит)
     for network, city in active_access:
         if user_id in user_daily_posts and network in user_daily_posts[user_id] and city in user_daily_posts[user_id][network]:
             post_data = user_daily_posts[user_id][network][city]
@@ -800,12 +804,12 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
+                            end_date_raw = paid.get("end_date")
+                            bot.send_message(chat_id, f"🛠 DEBUG → end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
                             try:
-                                end_date_raw = paid.get("end_date")
-                                bot.send_message(chat_id, f"🛠 end_date_raw: {repr(end_date_raw)} (type: {type(end_date_raw)})")
                                 if isinstance(end_date_raw, datetime):
                                     end_date = end_date_raw
-                                elif isinstance(end_date_raw, str) and "T" in end_date_raw:
+                                elif isinstance(end_date_raw, str):
                                     end_date = datetime.fromisoformat(end_date_raw)
                                 else:
                                     end_date = None
