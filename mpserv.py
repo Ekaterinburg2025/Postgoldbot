@@ -775,12 +775,7 @@ def show_statistics(message):
 
     response = "📊 Статистика публикаций:\n"
     for user_id, user_stats in stats.items():
-        try:
-            user_info = bot.get_chat(user_id)
-            user_name = get_user_name(user_info)
-        except Exception as err:
-            user_name = f"ID {user_id}"
-            bot.send_message(message.chat.id, f"⚠️ Не удалось получить имя пользователя {user_id}: {err}")
+        user_name = f"ID {user_id}"
 
         response += (
             f"👤 {user_name}:\n"
@@ -792,7 +787,24 @@ def show_statistics(message):
             response += "  • Детали:\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
-                    response += f"    - {network}, {city}: {data['published']} / {data['remaining']}\n"
+                    # Добавим срок оплаты
+                    end_date = None
+                    for paid in paid_users.get(user_id, []):
+                        if (
+                            (paid["network"] == network and paid["city"] == city) or
+                            (paid["network"] == "Все сети" and paid["city"] == city)
+                        ):
+                            end_date = paid["end_date"]
+                            break
+
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
+
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
+                    response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
 
         if user_stats["links"]:
             response += "  • Ссылки:\n"
