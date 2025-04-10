@@ -779,25 +779,33 @@ def show_statistics(message):
         try:
             user_info = bot.get_chat(user_id)
             user_name = get_user_name(user_info)
-        except:
+        except Exception as err:
             user_name = f"ID {user_id}"
+            bot.send_message(message.chat.id, f"⚠️ Не удалось получить имя пользователя {user_id}: {err}")
+
         response += (
             f"👤 {user_name}:\n"
             f"• Опубликовано: {user_stats['published']}\n"
             f"• Осталось: {user_stats['remaining']}\n"
         )
+
         if user_stats["details"]:
             response += "  • Детали:\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
                     response += f"    - {network}, {city}: {data['published']} / {data['remaining']}\n"
+
         if user_stats["links"]:
             response += "  • Ссылки:\n"
             for link in user_stats["links"]:
                 response += f"    - {link}\n"
+
         response += "\n"
 
-    bot.send_message(message.chat.id, response)
+    try:
+        bot.send_message(message.chat.id, response)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка при отправке статистики: {e}")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
@@ -1121,6 +1129,13 @@ def handle_stats_button(message):
                         if paid["network"] == network and paid["city"] == city:
                             end_date = paid["end_date"]
                             break
+
+                    # ✅ преобразуем строку в datetime, если нужно
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
 
                     expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
                     response += (
