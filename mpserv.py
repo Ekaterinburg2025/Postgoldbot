@@ -421,37 +421,31 @@ def is_today(timestamp):
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
     if user_id not in paid_users:
-        print(f"[DEBUG] Пользователь {user_id} не найден в оплативших.")
         return False
 
     for payment in paid_users[user_id]:
-        # Получаем дату окончания
         end_date = payment.get("end_date")
 
-        # Преобразуем в datetime, если строка
+        # Преобразуем, если вдруг строка
         if isinstance(end_date, str):
             try:
                 end_date = datetime.fromisoformat(end_date)
-            except Exception:
-                print(f"[WARN] Невозможно разобрать дату: {payment.get('end_date')}")
+            except:
                 continue
 
-        # Пропускаем истёкшие записи
-        if not end_date or end_date < datetime.now(ekaterinburg_tz):
-            print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
+        # Пропускаем, если дата невалидна
+        if not isinstance(end_date, datetime):
             continue
 
-        # Если оплачен доступ ко всем сетям для этого города
-        if payment.get("network") == "Все сети" and payment.get("city") == city:
-            print(f"[DEBUG] Пользователь {user_id} оплатил доступ ко всем сетям для города {city}.")
+        # Проверяем срок
+        if end_date < datetime.now(ekaterinburg_tz):
+            continue
+
+        # Проверка соответствия
+        if (payment["network"] == "Все сети" and payment["city"] == city) or \
+           (payment["network"] == network and payment["city"] == city):
             return True
 
-        # Если оплачен доступ к конкретной сети и городу
-        if payment.get("network") == network and payment.get("city") == city:
-            print(f"[DEBUG] Пользователь {user_id} оплатил доступ к сети {network} для города {city}.")
-            return True
-
-    print(f"[DEBUG] Пользователь {user_id} не оплатил доступ к сети {network} для города {city}.")
     return False
 
 # Сохранение данных в файл
@@ -1418,16 +1412,22 @@ def restore_data_from_json(json_data):
                 uid = int(user_id)
                 paid_users[uid] = []
                 for entry in entries:
-                    end_date = entry.get("end_date")
-                    if isinstance(end_date, str):
+                    raw_end_date = entry.get("end_date")
+                    end_date = None
+                    if isinstance(raw_end_date, str):
                         try:
-                            end_date = datetime.fromisoformat(end_date)
+                            end_date = datetime.fromisoformat(raw_end_date)
                         except Exception:
                             end_date = None
+                    elif isinstance(raw_end_date, datetime):
+                        end_date = raw_end_date
+                    # ❗ Не добавляем, если дата невалидна
+                    if end_date is None:
+                        continue
                     paid_users[uid].append({
                         "network": entry.get("network"),
                         "city": entry.get("city"),
-                        "end_date": end_date  # ← уже нормализовано
+                        "end_date": end_date
                     })
 
             # 📨 Посты
