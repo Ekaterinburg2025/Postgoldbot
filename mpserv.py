@@ -792,14 +792,15 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date = paid.get("end_date")
+                            try:
+                                end_date_raw = paid.get("end_date")
+                                if isinstance(end_date_raw, datetime):
+                                    end_date = end_date_raw
+                                else:
+                                    end_date = datetime.fromisoformat(str(end_date_raw))
+                            except Exception:
+                                end_date = None
                             break
-
-                    if not isinstance(end_date, datetime):
-                        try:
-                            end_date = datetime.fromisoformat(str(end_date))
-                        except:
-                            end_date = None
 
                     expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
                     response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
