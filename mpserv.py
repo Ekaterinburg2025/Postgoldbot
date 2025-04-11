@@ -1518,16 +1518,17 @@ if __name__ == '__main__':
         add_admin_user(admin_id)
 
     # Установка Webhook
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-print(f"[DEBUG] WEBHOOK_URL: {WEBHOOK_URL}")  # ← Чтобы увидеть в логах
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    print(f"[DEBUG] WEBHOOK_URL: {WEBHOOK_URL}")  # ← Чтобы увидеть в логах
 
-if WEBHOOK_URL:
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-else:
-    print("❌ WEBHOOK_URL не установлен — бот не подключён к Telegram!")
+    if WEBHOOK_URL:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=WEBHOOK_URL)
+        print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    else:
+        print("❌ WEBHOOK_URL не установлен — бот не подключён к Telegram!")
 
+    # <-- ВНЕ зависимости от webhook запускаем Flask
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
