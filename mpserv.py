@@ -492,7 +492,7 @@ def save_data(retries=3, delay=0.5):
                     break
             except Exception:
                 break
-    # Не удалось сохранить после всех попыток
+    print("[ERROR] Не удалось сохранить данные после всех попыток.")
 
 @bot.message_handler(commands=['start'])
 def start(message):
