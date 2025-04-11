@@ -1497,6 +1497,10 @@ def schedule_daily_backup():
 
 schedule_daily_backup()
 
+@app.route('/')
+def index():
+    return '✅ Бот запущен и работает!'
+
 if __name__ == '__main__':
     import time  # Обязательно: для паузы между remove и set webhook
 
