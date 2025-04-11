@@ -1303,9 +1303,7 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
-    STATIC_ADMINS = [479938867, 7235010425]
-    for admin_id in STATIC_ADMINS:
-        add_admin_user(admin_id)  # Только один раз!
-
+    add_admin_user(479938867)  # Только один раз!
+    add_admin_user(7235010425)  # Только один раз!
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
