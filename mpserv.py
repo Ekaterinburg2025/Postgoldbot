@@ -1497,17 +1497,21 @@ def schedule_daily_backup():
 
 schedule_daily_backup()
 
+@app.route('/')
+def index():
+    return '✅ Бот запущен и работает!'
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
     bot.process_new_updates([update])
     return 'ok', 200
 
-@app.route('/')
-def index():
-    return '✅ Бот запущен и работает!'
-
 if __name__ == '__main__':
-    add_admin_user(479938867, 7235010425)  # Только один раз!
+    # Статичные админы
+    STATIC_ADMINS = [479938867, 7235010425]
+    for admin_id in STATIC_ADMINS:
+        add_admin_user(admin_id)
+
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
