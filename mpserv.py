@@ -14,8 +14,12 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
-# Устанавливаем часовой пояс для Екатеринбурга
-ekaterinburg_tz = timezone('Asia/Yekaterinburg')
+# Собственная функция для экранирования спецсимволов Markdown
+def escape_md(text):
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    for ch in escape_chars:
+        text = text.replace(ch, f"\\{ch}")
+    return text
 
 # Получаем токен из переменной окружения
 TOKEN = os.getenv('BOT_TOKEN')
@@ -34,18 +38,6 @@ user_daily_posts = {}
 user_statistics = {}
 admins = []
 db_lock = threading.Lock()
-
-
-# Функции для работы с временем с учетом часового пояса
-def get_current_time():
-    """Возвращает текущее время в часовом поясе Екатеринбурга."""
-    return datetime.now(ekaterinburg_tz)
-
-
-def format_time(dt):
-    """Форматирует время для вывода пользователю."""
-    return dt.strftime("%d.%m.%Y %H:%M")
-
 
 # Инициализация базы данных
 def init_db():
@@ -77,7 +69,6 @@ def init_db():
             """)
             conn.commit()
 
-
 # Загрузка данных из базы данных
 def load_data():
     with db_lock:
@@ -93,9 +84,11 @@ def load_data():
                         local_paid_users[user_id] = []
 
                     # Приводим end_date к datetime
-                    if isinstance(end_date, str):
+                    if isinstance(end_date, datetime):
+                        parsed_date = end_date
+                    elif isinstance(end_date, str):
                         try:
-                            parsed_date = datetime.fromisoformat(end_date).astimezone(ekaterinburg_tz)
+                            parsed_date = datetime.fromisoformat(end_date)
                         except:
                             parsed_date = None
                     else:
@@ -118,9 +111,9 @@ def load_data():
                     if user_id not in local_user_posts:
                         local_user_posts[user_id] = []
                     try:
-                        post_time = datetime.fromisoformat(time_str).astimezone(ekaterinburg_tz)
+                        post_time = datetime.fromisoformat(time_str)
                     except:
-                        post_time = get_current_time()
+                        post_time = datetime.now()
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
@@ -140,7 +133,6 @@ def load_data():
         except Exception as e:
             print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
             return {}, [], {}
-
 
 # Инициализация базы данных
 init_db()
@@ -455,16 +447,10 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
-                            end_date = entry.get("end_date")
-                            if isinstance(end_date, datetime):
-                                end_date_str = end_date.isoformat()
-                            else:
-                                end_date_str = None
-
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], end_date_str))
+                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
                     # Сохранение админов
                     for user_id in admins:
@@ -473,13 +459,12 @@ def save_data(retries=3, delay=0.5):
                     # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
-                            time_str = post["time"].isoformat() if isinstance(post["time"], datetime) else None
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
                                 user_id, post["network"], post["city"],
-                                time_str, post["chat_id"], post["message_id"]
+                                post["time"], post["chat_id"], post["message_id"]
                             ))
 
                     conn.commit()
@@ -492,7 +477,7 @@ def save_data(retries=3, delay=0.5):
                     break
             except Exception:
                 break
-    print("[ERROR] Не удалось сохранить данные после всех попыток.")
+    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
