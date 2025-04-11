@@ -14,12 +14,8 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
-# Собственная функция для экранирования спецсимволов Markdown
-def escape_md(text):
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    for ch in escape_chars:
-        text = text.replace(ch, f"\\{ch}")
-    return text
+# Устанавливаем часовой пояс для Екатеринбурга
+ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 # Получаем токен из переменной окружения
 TOKEN = os.getenv('BOT_TOKEN')
@@ -38,6 +34,20 @@ user_daily_posts = {}
 user_statistics = {}
 admins = []
 db_lock = threading.Lock()
+
+# Статические администраторы (загружаются из переменной окружения или используются значения по умолчанию)
+STATIC_ADMINS = [int(admin_id) for admin_id in os.environ.get('STATIC_ADMINS', '479938867,7235010425').split(',')]
+
+# Функции для работы с временем с учетом часового пояса
+def get_current_time():
+    """Возвращает текущее время в часовом поясе Екатеринбурга."""
+    return datetime.now(ekaterinburg_tz)
+
+
+def format_time(dt):
+    """Форматирует время для вывода пользователю."""
+    return dt.strftime("%d.%m.%Y %H:%M")
+
 
 # Инициализация базы данных
 def init_db():
@@ -69,6 +79,7 @@ def init_db():
             """)
             conn.commit()
 
+
 # Загрузка данных из базы данных
 def load_data():
     with db_lock:
@@ -84,11 +95,9 @@ def load_data():
                         local_paid_users[user_id] = []
 
                     # Приводим end_date к datetime
-                    if isinstance(end_date, datetime):
-                        parsed_date = end_date
-                    elif isinstance(end_date, str):
+                    if isinstance(end_date, str):
                         try:
-                            parsed_date = datetime.fromisoformat(end_date)
+                            parsed_date = datetime.fromisoformat(end_date).astimezone(ekaterinburg_tz)
                         except:
                             parsed_date = None
                     else:
@@ -111,9 +120,9 @@ def load_data():
                     if user_id not in local_user_posts:
                         local_user_posts[user_id] = []
                     try:
-                        post_time = datetime.fromisoformat(time_str)
+                        post_time = datetime.fromisoformat(time_str).astimezone(ekaterinburg_tz)
                     except:
-                        post_time = datetime.now()
+                        post_time = get_current_time()
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
@@ -134,9 +143,67 @@ def load_data():
             print(f"[ERROR] Ошибка при загрузке данных из базы: {e}")
             return {}, [], {}
 
+
 # Инициализация базы данных
 init_db()
 paid_users, admins, user_posts = load_data()
+
+
+# Сохранение данных в файл
+def save_data(retries=3, delay=0.5):
+    """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
+    for attempt in range(retries):
+        with db_lock:
+            try:
+                with sqlite3.connect("bot_data.db", timeout=5) as conn:
+                    cur = conn.cursor()
+
+                    # Очистка таблиц
+                    cur.execute("DELETE FROM paid_users")
+                    cur.execute("DELETE FROM admin_users")
+                    cur.execute("DELETE FROM user_posts")
+
+                    # Сохранение оплативших пользователей
+                    for user_id, entries in paid_users.items():
+                        for entry in entries:
+                            end_date = entry.get("end_date")
+                            if isinstance(end_date, datetime):
+                                end_date_str = end_date.isoformat()
+                            else:
+                                end_date_str = None
+
+                            cur.execute("""
+                                INSERT INTO paid_users (user_id, network, city, end_date)
+                                VALUES (?, ?, ?, ?)
+                            """, (user_id, entry["network"], entry["city"], end_date_str))
+
+                    # Сохранение админов
+                    for user_id in admins:
+                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+
+                    # Сохранение публикаций
+                    for user_id, posts in user_posts.items():
+                        for post in posts:
+                            time_str = post["time"].isoformat() if isinstance(post["time"], datetime) else None
+                            cur.execute("""
+                                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                user_id, post["network"], post["city"],
+                                time_str, post["chat_id"], post["message_id"]
+                            ))
+
+                    conn.commit()
+                    return
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower():
+                    time.sleep(delay)
+                    continue
+                else:
+                    break
+            except Exception:
+                break
+    # Не удалось сохранить после всех попыток
 
 # Списки chat_id для каждой сети и города
 chat_ids_mk = {
@@ -246,10 +313,18 @@ def add_paid_user(user_id, network, city, end_date):
 
 def add_admin_user(user_id):
     with db_lock:
+        # Проверяем, есть ли пользователь в списке администраторов
         if user_id not in admins:
-            admins.append(user_id)
-            save_data()
+            admins.append(user_id)  # Добавляем в глобальный список
+            save_data()  # Сохраняем данные
 
+        # Добавляем администратора в базу данных
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+            conn.commit()
+
+    # Отправляем уведомления
     bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
     bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
@@ -260,13 +335,6 @@ def load_admin_users():
             cur.execute("SELECT user_id FROM admin_users")
             admin_users = [row[0] for row in cur.fetchall()]
             return admin_users  # Возвращаем список администраторов
-
-def add_admin_user(user_id):
-    with db_lock:
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
-            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
-            conn.commit()
 
 def is_admin(user_id):
     admin_users = load_admin_users()  # Загружаем список администраторов
@@ -429,55 +497,6 @@ def check_payment(user_id, network, city):
 
     print(f"[DEBUG] Пользователь {user_id} не оплатил доступ к сети {network} для города {city}.")
     return False
-
-# Сохранение данных в файл
-def save_data(retries=3, delay=0.5):
-    """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
-    for attempt in range(retries):
-        with db_lock:
-            try:
-                with sqlite3.connect("bot_data.db", timeout=5) as conn:
-                    cur = conn.cursor()
-
-                    # Очистка таблиц
-                    cur.execute("DELETE FROM paid_users")
-                    cur.execute("DELETE FROM admin_users")
-                    cur.execute("DELETE FROM user_posts")
-
-                    # Сохранение оплативших пользователей
-                    for user_id, entries in paid_users.items():
-                        for entry in entries:
-                            cur.execute("""
-                                INSERT INTO paid_users (user_id, network, city, end_date)
-                                VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
-
-                    # Сохранение админов
-                    for user_id in admins:
-                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
-
-                    # Сохранение публикаций
-                    for user_id, posts in user_posts.items():
-                        for post in posts:
-                            cur.execute("""
-                                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                            """, (
-                                user_id, post["network"], post["city"],
-                                post["time"], post["chat_id"], post["message_id"]
-                            ))
-
-                    conn.commit()
-                    return
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e).lower():
-                    time.sleep(delay)
-                    continue
-                else:
-                    break
-            except Exception:
-                break
-    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -1284,6 +1303,10 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
-    add_admin_user(479938867)  # Только один раз!
+    # Добавляем статических администраторов
+    for admin_id in STATIC_ADMINS:
+        add_admin_user(admin_id)  # Только один раз!
+
+    # Запуск Flask-приложения
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
