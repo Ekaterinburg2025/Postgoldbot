@@ -1497,33 +1497,17 @@ def schedule_daily_backup():
 
 schedule_daily_backup()
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
+    return 'ok', 200
+
 @app.route('/')
 def index():
     return '✅ Бот запущен и работает!'
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
-    bot.process_new_updates([update])
-    return "ok", 200
-
 if __name__ == '__main__':
-    import time  # Обязательно: для паузы между remove и set webhook
-
-    # ✅ Статичные админы
-    STATIC_ADMINS = [479938867, 7235010425]
-    for admin_id in STATIC_ADMINS:
-        add_admin_user(admin_id)
-
-    # ✅ Установка webhook
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Добавь в Render как переменную окружения
-    if WEBHOOK_URL:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=WEBHOOK_URL)
-    else:
-        print("⚠️ WEBHOOK_URL не установлен! Установи переменную окружения.")
-
-    # ✅ Запуск Flask-приложения
+    add_admin_user(479938867, 7235010425)  # Только один раз!
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
