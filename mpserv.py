@@ -2,15 +2,11 @@ import os
 import time
 import sqlite3
 import threading
-import json
-import threading
-from io import BytesIO
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 import pytz
 from pytz import timezone
-ekaterinburg_tz = timezone('Asia/Yekaterinburg')
 
 import telebot
 from telebot import types
@@ -40,7 +36,7 @@ paid_users = {}
 user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
-STATIC_ADMINS = {479938867, 7235010425}  # Статичные ID администраторов
+admins = []
 db_lock = threading.Lock()
 
 # Инициализация базы данных
@@ -117,7 +113,7 @@ def load_data():
                     try:
                         post_time = datetime.fromisoformat(time_str)
                     except:
-                        post_time = datetime.now(ekaterinburg_tz)
+                        post_time = datetime.now()
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
@@ -250,20 +246,11 @@ def add_paid_user(user_id, network, city, end_date):
 
 def add_admin_user(user_id):
     with db_lock:
-        # Добавляем в список в памяти
         if user_id not in admins:
             admins.append(user_id)
             save_data()
 
-        # Добавляем в SQLite-базу
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
-            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
-            conn.commit()
-
-    # Уведомление
-    if user_id != ADMIN_CHAT_ID:
-        bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
+    bot.send_message(ADMIN_CHAT_ID, f"✅ Пользователь {user_id} добавлен как администратор.")
     bot.send_message(user_id, "✅ Вы добавлены как администратор.")
 
 def load_admin_users():
@@ -271,11 +258,19 @@ def load_admin_users():
         with sqlite3.connect("bot_data.db") as conn:
             cur = conn.cursor()
             cur.execute("SELECT user_id FROM admin_users")
-            return [row[0] for row in cur.fetchall()]
+            admin_users = [row[0] for row in cur.fetchall()]
+            return admin_users  # Возвращаем список администраторов
+
+def add_admin_user(user_id):
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
+            conn.commit()
 
 def is_admin(user_id):
-    STATIC_ADMINS = [479938867, 7235010425]  # ← добавь свои ID
-    return user_id in STATIC_ADMINS or user_id in admins
+    admin_users = load_admin_users()  # Загружаем список администраторов
+    return user_id in admin_users  # Проверяем, есть ли пользователь в списке
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
@@ -294,85 +289,69 @@ def is_new_day(last_post_time):
     """Проверяет, наступил ли новый день."""
     if last_post_time is None:
         return True
-    return last_post_time.date() < datetime.now(ekaterinburg_tz).date()
+    return last_post_time.date() < datetime.now().date()
 
 def is_today(post_time):
     """Проверяет, было ли время публикации сегодня."""
-    return post_time.date() == datetime.now(ekaterinburg_tz).date()
+    return post_time.date() == datetime.now().date()
 
 # Функция для выбора срока оплаты
-from pytz import timezone
-
-ekaterinburg_tz = timezone('Asia/Yekaterinburg')
-
 def select_duration_for_payment(message, user_id, network, city):
+    if message.text == "Назад":
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
+        if network == "Мужской Клуб":
+            cities = list(chat_ids_mk.keys())
+        elif network == "ПАРНИ 18+":
+            cities = list(chat_ids_parni.keys())
+        elif network == "НС":
+            cities = list(chat_ids_ns.keys())
+        markup.add(*cities)
+        markup.add("Назад")
+        bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
+        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
+        return
+
+    duration = message.text
+    if duration == "День":
+        days = 1
+    elif duration == "Неделя":
+        days = 7
+    elif duration == "Месяц":
+        days = 30
+    else:
+        bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильный срок.")
+        bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
+        return
+
+    expiry_date = datetime.now() + timedelta(days=days)
+
+    if user_id not in paid_users:
+        paid_users[user_id] = []
+
+    paid_users[user_id].append({
+        "end_date": expiry_date.isoformat(),
+        "network": network,
+        "city": city
+    })
+    save_data()
+
+    # Получаем имя пользователя для админа
     try:
-        global paid_users, chat_ids_mk, chat_ids_parni, chat_ids_ns, ekaterinburg_tz, ADMIN_CHAT_ID
-
-        if message.text == "Назад":
-            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-            if network == "Мужской Клуб":
-                cities = list(chat_ids_mk.keys())
-            elif network == "ПАРНИ 18+":
-                cities = list(chat_ids_parni.keys())
-            elif network == "НС":
-                cities = list(chat_ids_ns.keys())
-            else:
-                cities = []
-            markup.add(*cities)
-            markup.add("Назад")
-            bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
-            bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
-            return
-
-        duration = message.text.strip()
-        if duration == "День":
-            days = 1
-        elif duration == "Неделя":
-            days = 7
-        elif duration == "Месяц":
-            days = 30
-        else:
-            bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильный срок.")
-            bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
-            return
-
-        if 'ekaterinburg_tz' not in globals():
-            from pytz import timezone
-            ekaterinburg_tz = timezone("Asia/Yekaterinburg")
-
-        end_date = datetime.now(ekaterinburg_tz) + timedelta(days=days)
-        end_date_str = end_date.isoformat()
-
-        if user_id not in paid_users:
-            paid_users[user_id] = []
-
-        paid_users[user_id].append({
-            "end_date": end_date_str,
-            "network": network,
-            "city": city
-        })
-
-        save_data()
-
-        try:
-            user_info = bot.get_chat(user_id)
-            user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
-            if not user_name:
-                user_name = user_info.username or "Имя не указано"
-        except Exception:
-            user_name = "Имя не найдено"
-
-        bot.send_message(
-            ADMIN_CHAT_ID,
-            f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n"
-            f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}"
-        )
+        user_info = bot.get_chat(user_id)
+        user_name = f"{user_info.first_name or ''} {user_info.last_name or ''}".strip()
+        if not user_name:
+            user_name = user_info.username or "Имя не указано"
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка при добавлении: {e}")
+        user_name = "Имя не найдено"
+
+    # Уведомление админу
+    bot.send_message(
+        ADMIN_CHAT_ID,
+        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+    )
 
 def is_today(dt):
-    return dt.date() == datetime.now(ekaterinburg_tz).date()
+    return dt.date() == datetime.now().date()
 
 def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
@@ -387,7 +366,7 @@ def get_user_statistics(user_id):
             except:
                 end_date = None
 
-        if end_date and end_date >= datetime.now(ekaterinburg_tz):
+        if end_date and end_date >= datetime.now():
             if access["network"] == "Все сети":
                 for net in ["Мужской Клуб", "ПАРНИ 18+", "НС"]:
                     active_access.append((net, access["city"]))
@@ -419,7 +398,7 @@ def get_user_statistics(user_id):
     return stats
 
 def is_today(timestamp):
-    now = datetime.now(ekaterinburg_tz)
+    now = datetime.now()
     try:
         parsed_time = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp
         return parsed_time.date() == now.date()
@@ -428,82 +407,64 @@ def is_today(timestamp):
 
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу."""
-    if user_id not in paid_users:
+    if str(user_id) not in paid_users:
+        print(f"[DEBUG] Пользователь {user_id} не найден в оплативших.")
         return False
 
-    for payment in paid_users[user_id]:
-        end_date = payment.get("end_date")
+    for payment in paid_users[str(user_id)]:
+        # Проверяем, не истёк ли срок оплаты
+        if payment["expiry_date"] < datetime.now():
+            print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
+            continue  # Пропускаем истёкшие платежи
 
-        # Преобразуем, если вдруг строка
-        if isinstance(end_date, str):
-            try:
-                end_date = datetime.fromisoformat(end_date)
-            except:
-                continue
-
-        # Пропускаем, если дата невалидна
-        if not isinstance(end_date, datetime):
-            continue
-
-        # Проверяем срок
-        if end_date < datetime.now(ekaterinburg_tz):
-            continue
-
-        # Проверка соответствия
-        if (payment["network"] == "Все сети" and payment["city"] == city) or \
-           (payment["network"] == network and payment["city"] == city):
+        # Если оплачен доступ ко всем сетям для этого города
+        if payment["network"] == "Все сети" and payment["city"] == city:
+            print(f"[DEBUG] Пользователь {user_id} оплатил доступ ко всем сетям для города {city}.")
             return True
 
+        # Если оплачен доступ к конкретной сети и городу
+        if payment["network"] == network and payment["city"] == city:
+            print(f"[DEBUG] Пользователь {user_id} оплатил доступ к сети {network} для города {city}.")
+            return True
+
+    print(f"[DEBUG] Пользователь {user_id} не оплатил доступ к сети {network} для города {city}.")
     return False
 
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
+    """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
     for attempt in range(retries):
         with db_lock:
             try:
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
+                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # 💾 Оплаченные
+                    # Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
-                            end_date = entry.get("end_date")
-                            if isinstance(end_date, datetime):
-                                end_date_str = end_date.isoformat()
-                            elif isinstance(end_date, str):
-                                end_date_str = end_date
-                            else:
-                                end_date_str = None
-
-                            if end_date_str is None:
-                                print(f"[SAVE WARNING] Пропущена запись с пустой датой у пользователя {user_id}")
-                                continue  # Пропускаем невалидные записи
-
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], end_date_str))
+                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
 
-                    # 💾 Админы
-                    for admin_id in admins:
-                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (admin_id,))
+                    # Сохранение админов
+                    for user_id in admins:
+                        cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # 💾 Посты
+                    # Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
-                            time_str = post["time"]
-                            if isinstance(time_str, datetime):
-                                time_str = time_str.isoformat()
                             cur.execute("""
                                 INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (
                                 user_id, post["network"], post["city"],
-                                time_str, post["chat_id"], post["message_id"]
+                                post["time"], post["chat_id"], post["message_id"]
                             ))
 
                     conn.commit()
@@ -513,60 +474,10 @@ def save_data(retries=3, delay=0.5):
                     time.sleep(delay)
                     continue
                 else:
-                    print(f"[SAVE ERROR] {e}")
                     break
-            except Exception as e:
-                print(f"[SAVE ERROR] {e}")
+            except Exception:
                 break
-
-def save_backup_to_json():
-    with db_lock:
-        # Подготовка paid_users
-        safe_paid_users = {}
-        for user_id, entries in paid_users.items():
-            safe_paid_users[user_id] = []
-            for entry in entries:
-                end_date = entry.get("end_date")
-                if isinstance(end_date, datetime):
-                    end_date = end_date.replace(tzinfo=None).isoformat()
-                safe_paid_users[user_id].append({
-                    "network": entry.get("network"),
-                    "city": entry.get("city"),
-                    "end_date": end_date
-                })
-
-        # Подготовка user_posts
-        safe_user_posts = {}
-        for user_id, posts in user_posts.items():
-            safe_user_posts[user_id] = []
-            for post in posts:
-                post_copy = post.copy()
-                if isinstance(post_copy.get("time"), datetime):
-                    post_copy["time"] = post_copy["time"].replace(tzinfo=None).isoformat()
-                safe_user_posts[user_id].append(post_copy)
-
-        # Подготовка user_daily_posts
-        safe_daily = {}
-        for user_id, networks in user_daily_posts.items():
-            safe_daily[user_id] = {}
-            for network, cities in networks.items():
-                safe_daily[user_id][network] = {}
-                for city, data in cities.items():
-                    safe_daily[user_id][network][city] = {
-                        "posts": [p.replace(tzinfo=None).isoformat() for p in data.get("posts", [])],
-                        "deleted_posts": [d.replace(tzinfo=None).isoformat() for d in data.get("deleted_posts", [])]
-                    }
-
-        # Объединяем всё
-        data = {
-            "paid_users": safe_paid_users,
-            "user_posts": safe_user_posts,
-            "user_daily_posts": safe_daily,
-            "admins": admins
-        }
-
-        json_data = json.dumps(data, indent=2)
-        return BytesIO(json_data.encode("utf-8"))
+    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -633,7 +544,7 @@ def update_daily_posts(user_id, network, city, remove=False):
             if city not in user_daily_posts[user_id][network]:
                 user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-            current_time = datetime.now(ekaterinburg_tz)
+            current_time = datetime.now()
 
             if remove:
                 if user_daily_posts[user_id][network][city]["posts"]:
@@ -694,7 +605,7 @@ def is_user_paid(user_id, network, city):
                     print(f"[WARN] Некорректный формат даты: {entry['end_date']}")
                     continue
 
-            if isinstance(end_date, datetime) and datetime.now(ekaterinburg_tz) < end_date:
+            if isinstance(end_date, datetime) and datetime.now() < end_date:
                 print(f"[DEBUG] Доступ разрешён: {entry}")
                 return True
             else:
@@ -906,7 +817,7 @@ def get_admin_statistics():
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
-        bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
+        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
         return
 
     stats = get_admin_statistics()
@@ -934,19 +845,16 @@ def show_statistics_for_admin(chat_id):
                             (paid.get("network") == network and paid.get("city") == city) or
                             (paid.get("network") == "Все сети" and paid.get("city") == city)
                         ):
-                            end_date_raw = paid.get("end_date")
-                            if isinstance(end_date_raw, str):
-                                try:
-                                    end_date = datetime.fromisoformat(end_date_raw)
-                                except:
-                                    end_date = None
-                            elif isinstance(end_date_raw, datetime):
-                                end_date = end_date_raw
+                            end_date = paid.get("end_date")
                             break
 
-                    # 🛡 Безопасное форматирование даты
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
+                    if isinstance(end_date, str):
+                        try:
+                            end_date = datetime.fromisoformat(end_date)
+                        except:
+                            end_date = None
 
+                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
                     response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
 
         if user_stats["links"]:
@@ -1232,7 +1140,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             user_posts[user_id].append({
                 "message_id": sent_message.message_id,
                 "chat_id": chat_id,
-                "time": datetime.now(ekaterinburg_tz),
+                "time": datetime.now(),
                 "city": city,
                 "network": network
             })
@@ -1245,7 +1153,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             if city not in user_daily_posts[user_id][network]:
                 user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-            user_daily_posts[user_id][network][city]["posts"].append(datetime.now(ekaterinburg_tz))
+            user_daily_posts[user_id][network][city]["posts"].append(datetime.now())
 
             bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {city}.")
 
@@ -1364,138 +1272,6 @@ def show_statistics_for_admin(chat_id):
         bot.send_message(chat_id, response)
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
-
-@bot.message_handler(commands=['backup'])
-def handle_backup(message):
-    if not is_admin(message.chat.id):
-        bot.send_message(message.chat.id, "⛔ У вас нет прав.")
-        return
-    backup_file = save_backup_to_json()
-    bot.send_document(message.chat.id, backup_file, caption="📦 Бэкап данных", visible_file_name="backup.json")
-
-@bot.message_handler(commands=['restore'])
-def handle_restore_start(message):
-    if not is_admin(message.chat.id):
-        bot.send_message(message.chat.id, "⛔ У вас нет прав.")
-        return
-
-    bot.send_message(message.chat.id, "📁 Отправьте файл JSON для восстановления:")
-    bot.register_next_step_handler(message, handle_restore_file)
-
-def handle_restore_file(message):
-    if not message.document:
-        bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте корректный .json файл.")
-        return
-
-    try:
-        file_info = bot.get_file(message.document.file_id)
-        downloaded = bot.download_file(file_info.file_path)
-
-        bot.send_message(message.chat.id, "📥 Начинаю восстановление данных...")
-
-        success = restore_data_from_json(downloaded.decode("utf-8"))
-
-        if success:
-            bot.send_message(message.chat.id, "✅ Восстановление завершено успешно.")
-        else:
-            bot.send_message(message.chat.id, "❌ Ошибка восстановления: возможно, неверный формат файла.")
-
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка загрузки или восстановления: {e}")
-
-def restore_data_from_json(json_data):
-    try:
-        data = json.loads(json_data)
-
-        with db_lock:
-            global paid_users, user_posts, user_daily_posts, admins  # обязательно global
-
-            # 👤 Оплатившие
-            temp_paid_users = {}
-            for user_id, entries in data.get("paid_users", {}).items():
-                uid = int(user_id)
-                temp_paid_users[uid] = []
-                for entry in entries:
-                    end_date = entry.get("end_date")
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except Exception:
-                            end_date = None
-                    temp_paid_users[uid].append({
-                        "network": entry.get("network"),
-                        "city": entry.get("city"),
-                        "end_date": end_date
-                    })
-            paid_users = temp_paid_users  # теперь точно назначен
-
-            # 📨 Посты
-            temp_user_posts = {}
-            for user_id, posts in data.get("user_posts", {}).items():
-                uid = int(user_id)
-                temp_user_posts[uid] = []
-                for post in posts:
-                    try:
-                        post["time"] = datetime.fromisoformat(post["time"])
-                    except Exception:
-                        post["time"] = datetime.now()
-                    temp_user_posts[uid].append(post)
-            user_posts = temp_user_posts
-
-            # 📊 Лимиты
-            temp_user_daily = {}
-            for user_id, networks in data.get("user_daily_posts", {}).items():
-                uid = int(user_id)
-                temp_user_daily[uid] = {}
-                for network, cities in networks.items():
-                    temp_user_daily[uid][network] = {}
-                    for city, post_data in cities.items():
-                        posts = []
-                        deleted = []
-                        for p in post_data.get("posts", []):
-                            try:
-                                posts.append(datetime.fromisoformat(p))
-                            except:
-                                continue
-                        for d in post_data.get("deleted_posts", []):
-                            try:
-                                deleted.append(datetime.fromisoformat(d))
-                            except:
-                                continue
-                        temp_user_daily[uid][network][city] = {
-                            "posts": posts,
-                            "deleted_posts": deleted
-                        }
-            user_daily_posts = temp_user_daily
-
-            # 🛡 Админы
-            admins = [int(a) for a in data.get("admins", [])]
-
-            save_data()
-
-        return True
-
-    except Exception as e:
-        print(f"[RESTORE ERROR] {e}")
-        return False
-
-def schedule_daily_backup():
-    def task():
-        ekb_tz = pytz.timezone("Asia/Yekaterinburg")
-        while True:
-            now = datetime.now(ekb_tz)
-            if now.hour == 1 and now.minute == 0:
-                backup_file = save_backup_to_json()
-                try:
-                    bot.send_document(ADMIN_CHAT_ID, backup_file, caption="🕓 Ежедневный бэкап", visible_file_name="daily_backup.json")
-                except Exception as e:
-                    print(f"[ERROR] Автобэкап: {e}")
-                time.sleep(60)  # Ждём минуту, чтобы не дублировалось
-            time.sleep(30)
-
-    threading.Thread(target=task, daemon=True).start()
-
-schedule_daily_backup()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
