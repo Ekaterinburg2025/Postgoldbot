@@ -1508,10 +1508,20 @@ def webhook():
     return 'ok', 200
 
 if __name__ == '__main__':
-    # Статичные админы
+    import time
     STATIC_ADMINS = [479938867, 7235010425]
     for admin_id in STATIC_ADMINS:
         add_admin_user(admin_id)
+
+    # Установка Webhook
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    if WEBHOOK_URL:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=WEBHOOK_URL)
+        print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    else:
+        print("⚠️ Переменная окружения WEBHOOK_URL не установлена!")
 
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
