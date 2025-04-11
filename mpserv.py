@@ -1304,6 +1304,5 @@ def index():
 
 if __name__ == '__main__':
     add_admin_user(479938867)  # Только один раз!
-    add_admin_user(7235010425)  # Только один раз!
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
