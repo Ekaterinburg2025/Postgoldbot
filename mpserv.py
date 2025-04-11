@@ -1497,38 +1497,17 @@ def schedule_daily_backup():
 
 schedule_daily_backup()
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
+    return 'ok', 200
+
 @app.route('/')
 def index():
     return '✅ Бот запущен и работает!'
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return 'ok', 200
-    else:
-        return 'unsupported media type', 415
-
 if __name__ == '__main__':
-    import time
-    STATIC_ADMINS = [479938867, 7235010425]
-    for admin_id in STATIC_ADMINS:
-        add_admin_user(admin_id)
-
-    # Установка Webhook
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    print(f"[DEBUG] WEBHOOK_URL: {WEBHOOK_URL}")  # ← Чтобы увидеть в логах
-
-    if WEBHOOK_URL:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=WEBHOOK_URL)
-        print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-    else:
-        print("❌ WEBHOOK_URL не установлен — бот не подключён к Telegram!")
-
-    # <-- ВНЕ зависимости от webhook запускаем Flask
+    add_admin_user(479938867)  # Только один раз!
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
