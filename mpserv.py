@@ -4,6 +4,8 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 from collections import defaultdict
+import threading
+import shutil
 
 import pytz
 from pytz import timezone
@@ -282,6 +284,41 @@ def add_admin_user(user_id):
 def is_admin(user_id):
     admin_users = load_admin_users()
     return user_id in admin_users or user_id in CORE_ADMINS
+
+@bot.message_handler(commands=["backup"])
+def handle_backup(message):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        with open("bot_data.db", "rb") as f:
+            bot.send_document(message.chat.id, f, caption="📦 Бэкап базы данных")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Не удалось отправить бэкап: {e}")
+
+@bot.message_handler(commands=["restore"])
+def handle_restore_command(message):
+    if not is_admin(message.from_user.id):
+        return
+    bot.send_message(message.chat.id, "📥 Отправьте файл `bot_data.db` для восстановления.")
+    bot.register_next_step_handler(message, handle_restore_file)
+
+def handle_restore_file(message):
+    if not message.document:
+        bot.send_message(message.chat.id, "❌ Это не файл. Отправьте `bot_data.db`.")
+        return
+
+    try:
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+
+        with open("bot_data.db", "wb") as f:
+            f.write(downloaded_file)
+
+        load_data()
+        bot.send_message(message.chat.id, "✅ База данных успешно восстановлена!")
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка при восстановлении: {e}")
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
@@ -573,6 +610,27 @@ def update_daily_posts(user_id, network, city, remove=False):
             save_data()
         except Exception as e:
             print(f"[ERROR] Ошибка при обновлении статистики: {e}")
+
+def send_nightly_backup():
+    try:
+        with open("bot_data.db", "rb") as f:
+            bot.send_document(ADMIN_CHAT_ID, f, caption="🌙 Ночной бэкап базы данных")
+            print("[✅ BACKUP] Ночной бэкап отправлен")
+    except Exception as e:
+        print(f"[❌ BACKUP] Ошибка при отправке бэкапа: {e}")
+
+def schedule_auto_backup():
+    def check_and_backup():
+        while True:
+            now = now_ekb()
+            if now.hour == 1 and now.minute == 0:  # 01:00 по Екатеринбургу
+                send_nightly_backup()
+                time.sleep(61)
+            else:
+                time.sleep(30)
+    t = threading.Thread(target=check_and_backup)
+    t.daemon = True
+    t.start()
 
 @bot.message_handler(commands=['my_stats'])
 def show_user_statistics(message):
@@ -1308,7 +1366,8 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
-    add_admin_user(479938867)  # Только один раз!
-    add_admin_user(7235010425)  # Только один раз!
+    add_admin_user(479938867)
+    add_admin_user(7235010425)
+    schedule_auto_backup()  # 🕐 Запуск авто-бэкапа в фоне
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
