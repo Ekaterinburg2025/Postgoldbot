@@ -322,6 +322,23 @@ def handle_restore_file(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при восстановлении: {e}")
 
+@bot.message_handler(commands=["debug_users"])
+def handle_debug_users(message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not paid_users:
+        bot.send_message(message.chat.id, "⚠️ paid_users пуст.")
+        return
+
+    text = f"🧠 В памяти {len(paid_users)} оплативших:\n"
+    for uid, entries in paid_users.items():
+        text += f"\n👤 ID: {uid}"
+        for e in entries:
+            end = e['end_date']
+            text += f"\n• {e['network']} | {e['city']} → {end}"
+    bot.send_message(message.chat.id, text)
+
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
     """Считает количество уникальных комбинаций сетей и городов для пользователя."""
