@@ -485,6 +485,8 @@ def check_payment(user_id, network, city):
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
+    print(f"[💾 SAVE] Сохраняем: оплативших = {len(paid_users)}, постов = {len(user_posts)}, админов = {len(admins)}")
+
     for attempt in range(retries):
         with db_lock:
             try:
@@ -520,16 +522,19 @@ def save_data(retries=3, delay=0.5):
                             ))
 
                     conn.commit()
+                    print("[✅ SAVE] Успешно записано в bot_data.db")
                     return
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
+                    print("[⏳ SAVE] Попытка сохранения отклонена: база занята, пробуем снова...")
                     time.sleep(delay)
                     continue
                 else:
+                    print(f"[❌ SAVE] Ошибка SQLite: {e}")
                     break
-            except Exception:
+            except Exception as ex:
+                print(f"[❌ SAVE] Неизвестная ошибка: {ex}")
                 break
-    # Не удалось сохранить после всех попыток
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -1366,8 +1371,11 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
+    load_data()  # 🧠 Загружаем данные из базы при запуске
+
     add_admin_user(479938867)
     add_admin_user(7235010425)
+
     schedule_auto_backup()  # 🕐 Запуск авто-бэкапа в фоне
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
