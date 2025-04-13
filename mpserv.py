@@ -1408,11 +1408,16 @@ def index():
     return '✅ Бот запущен и работает!'
 
 if __name__ == '__main__':
-    load_data()  # 🧠 Загружаем данные из базы при запуске
+    init_db()
+    paid_users, admins, user_posts = load_data()
 
-    add_admin_user(479938867)
-    add_admin_user(7235010425)
+    # 🛡 Добавляем CORE_ADMINS, если их нет
+    for core_admin in CORE_ADMINS:
+        if core_admin not in admins:
+            admins.append(core_admin)
 
-    schedule_auto_backup()  # 🕐 Запуск авто-бэкапа в фоне
+    save_data()  # 💾 Обновляем базу, чтобы не слетали при следующем запуске
+
+    schedule_auto_backup()
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
