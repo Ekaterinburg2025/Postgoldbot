@@ -347,21 +347,18 @@ def select_duration_for_payment(message, user_id, network, city):
     except Exception as e:
         user_name = "Имя не найдено"
 
-# Уведомление назначившему админу
-if message.chat.id != ADMIN_CHAT_ID:
+    # Уведомление назначившему админу
+    if message.chat.id != ADMIN_CHAT_ID:
+        bot.send_message(
+            message.chat.id,
+            f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+        )
+
+    # Уведомление главному админу (если нужно)
     bot.send_message(
-        message.chat.id,
-        f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
+        ADMIN_CHAT_ID,
+        f"👨‍💼 {get_user_name(message.from_user)} добавил пользователя {user_name} (ID: {user_id}) в сеть «{network}», город {city} на {days} дн.\n📅 До: {expiry_date.strftime('%d.%m.%Y')}"
     )
-
-# Уведомление главному админу (если нужно)
-bot.send_message(
-    ADMIN_CHAT_ID,
-    f"👨‍💼 {get_user_name(message.from_user)} добавил пользователя {user_name} (ID: {user_id}) в сеть «{network}», город {city} на {days} дн.\n📅 До: {expiry_date.strftime('%d.%m.%Y')}"
-)
-
-def is_today(dt):
-    return dt.date() == now_ekb().date()
 
 def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
