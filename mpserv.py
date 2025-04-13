@@ -42,6 +42,9 @@ user_statistics = {}
 admins = []
 db_lock = threading.Lock()
 
+# 🔒 Вечные (статичные) админы
+CORE_ADMINS = [479938867, 7235010425]
+
 # Инициализация базы данных
 def init_db():
     with db_lock:
@@ -277,8 +280,8 @@ def add_admin_user(user_id):
             conn.commit()
 
 def is_admin(user_id):
-    admin_users = load_admin_users()  # Загружаем список администраторов
-    return user_id in admin_users  # Проверяем, есть ли пользователь в списке
+    admin_users = load_admin_users()
+    return user_id in admin_users or user_id in CORE_ADMINS
 
 # Вспомогательная функция для подсчёта уникальных комбинаций "сеть + город"
 def count_unique_networks_cities(user_id):
