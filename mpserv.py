@@ -8,6 +8,9 @@ from collections import defaultdict
 import pytz
 from pytz import timezone
 
+def now_ekb():
+    return datetime.now(timezone('Asia/Yekaterinburg'))
+
 import telebot
 from telebot import types
 from telebot.apihelper import ApiTelegramException
@@ -113,7 +116,7 @@ def load_data():
                     try:
                         post_time = datetime.fromisoformat(time_str)
                     except:
-                        post_time = datetime.now()
+                        post_time = now_ekb()
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
@@ -289,11 +292,11 @@ def is_new_day(last_post_time):
     """Проверяет, наступил ли новый день."""
     if last_post_time is None:
         return True
-    return last_post_time.date() < datetime.now().date()
+    return last_post_time.date() < now_ekb().date()
 
 def is_today(post_time):
     """Проверяет, было ли время публикации сегодня."""
-    return post_time.date() == datetime.now().date()
+    return post_time.date() == now_ekb().date()
 
 # Функция для выбора срока оплаты
 def select_duration_for_payment(message, user_id, network, city):
@@ -323,7 +326,7 @@ def select_duration_for_payment(message, user_id, network, city):
         bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
         return
 
-    expiry_date = datetime.now() + timedelta(days=days)
+    expiry_date = now_ekb() + timedelta(days=days)
 
     if user_id not in paid_users:
         paid_users[user_id] = []
@@ -344,14 +347,21 @@ def select_duration_for_payment(message, user_id, network, city):
     except Exception as e:
         user_name = "Имя не найдено"
 
-    # Уведомление админу
+# Уведомление назначившему админу
+if message.chat.id != ADMIN_CHAT_ID:
     bot.send_message(
-        ADMIN_CHAT_ID,
+        message.chat.id,
         f"✅ Пользователь {user_name} (ID: {user_id}) добавлен в сеть «{network}», город {city} на {days} дн.\n📅 Действует до: {expiry_date.strftime('%d.%m.%Y')}"
     )
 
+# Уведомление главному админу (если нужно)
+bot.send_message(
+    ADMIN_CHAT_ID,
+    f"👨‍💼 {get_user_name(message.from_user)} добавил пользователя {user_name} (ID: {user_id}) в сеть «{network}», город {city} на {days} дн.\n📅 До: {expiry_date.strftime('%d.%m.%Y')}"
+)
+
 def is_today(dt):
-    return dt.date() == datetime.now().date()
+    return dt.date() == now_ekb().date()
 
 def get_user_statistics(user_id):
     stats = {"published": 0, "remaining": 0, "details": {}}
@@ -366,7 +376,7 @@ def get_user_statistics(user_id):
             except:
                 end_date = None
 
-        if end_date and end_date >= datetime.now():
+        if end_date and end_date >= now_ekb():
             if access["network"] == "Все сети":
                 for net in ["Мужской Клуб", "ПАРНИ 18+", "НС"]:
                     active_access.append((net, access["city"]))
@@ -398,10 +408,10 @@ def get_user_statistics(user_id):
     return stats
 
 def is_today(timestamp):
-    now = datetime.now()
+    now = now_ekb()
     try:
         parsed_time = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp
-        return parsed_time.date() == now.date()
+        return parsed_time.date() == now_ekb().date()
     except:
         return False
 
@@ -413,7 +423,7 @@ def check_payment(user_id, network, city):
 
     for payment in paid_users[str(user_id)]:
         # Проверяем, не истёк ли срок оплаты
-        if payment["expiry_date"] < datetime.now():
+        if payment["expiry_date"] < now_ekb():
             print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
             continue  # Пропускаем истёкшие платежи
 
@@ -544,7 +554,7 @@ def update_daily_posts(user_id, network, city, remove=False):
             if city not in user_daily_posts[user_id][network]:
                 user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-            current_time = datetime.now()
+            current_time = now_ekb()
 
             if remove:
                 if user_daily_posts[user_id][network][city]["posts"]:
@@ -605,7 +615,7 @@ def is_user_paid(user_id, network, city):
                     print(f"[WARN] Некорректный формат даты: {entry['end_date']}")
                     continue
 
-            if isinstance(end_date, datetime) and datetime.now() < end_date:
+            if isinstance(end_date, datetime) and now_ekb() < end_date:
                 print(f"[DEBUG] Доступ разрешён: {entry}")
                 return True
             else:
@@ -1140,7 +1150,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             user_posts[user_id].append({
                 "message_id": sent_message.message_id,
                 "chat_id": chat_id,
-                "time": datetime.now(),
+                "time": now_ekb(),
                 "city": city,
                 "network": network
             })
@@ -1153,7 +1163,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             if city not in user_daily_posts[user_id][network]:
                 user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-            user_daily_posts[user_id][network][city]["posts"].append(datetime.now())
+            user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
 
             bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {city}.")
 
