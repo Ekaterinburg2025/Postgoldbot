@@ -290,6 +290,8 @@ def handle_backup(message):
     if not is_admin(message.from_user.id):
         return
     try:
+        save_data()  # 💾 обязательно сохраняем перед отправкой
+
         with open("bot_data.db", "rb") as f:
             bot.send_document(message.chat.id, f, caption="📦 Бэкап базы данных")
     except Exception as e:
@@ -485,7 +487,10 @@ def check_payment(user_id, network, city):
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
-    print(f"[💾 SAVE] Сохраняем: оплативших = {len(paid_users)}, постов = {len(user_posts)}, админов = {len(admins)}")
+    print(f"[💾 SAVE] Начинаем сохранение:")
+    print(f"  - Оплативших: {len(paid_users)}")
+    print(f"  - Постов: {len(user_posts)}")
+    print(f"  - Админов: {len(admins)}")
 
     for attempt in range(retries):
         with db_lock:
@@ -504,7 +509,12 @@ def save_data(retries=3, delay=0.5):
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (user_id, entry["network"], entry["city"], entry["end_date"].isoformat()))
+                            """, (
+                                user_id,
+                                entry["network"],
+                                entry["city"],
+                                entry["end_date"].isoformat()
+                            ))
 
                     # Сохранение админов
                     for user_id in admins:
@@ -523,10 +533,20 @@ def save_data(retries=3, delay=0.5):
 
                     conn.commit()
                     print("[✅ SAVE] Успешно записано в bot_data.db")
+
+                    # 📨 Уведомление в Telegram
+                    message = (
+                        "✅ *Сохранение завершено:*\n"
+                        f"👤 Пользователей: *{len(paid_users)}*\n"
+                        f"📬 Постов: *{len(user_posts)}*\n"
+                        f"👮 Админов: *{len(admins)}*"
+                    )
+                    bot.send_message(ADMIN_CHAT_ID, message, parse_mode="Markdown")
+
                     return
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
-                    print("[⏳ SAVE] Попытка сохранения отклонена: база занята, пробуем снова...")
+                    print("[⏳ SAVE] База занята, пробуем снова...")
                     time.sleep(delay)
                     continue
                 else:
