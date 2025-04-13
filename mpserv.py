@@ -224,7 +224,12 @@ def format_time(timestamp):
     return local_time.strftime("%H:%M, %d %B %Y")
 
 def format_time(dt):
-    return dt.strftime("%d.%m %H:%M")
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except:
+            return "неизвестно"
+    return dt.strftime("%d.%m.%Y %H:%M")
 
 def get_user_name(user):
     name = escape_md(user.first_name)
@@ -621,20 +626,22 @@ def is_user_paid(user_id, network, city):
     print(f"[DEBUG] Нет активного доступа к {network}, {city}")
     return False
 
-# Админ-панель
+# 🛠 Админ-панель
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if not is_admin(message.chat.id):
-        bot.send_message(message.chat.id, " У вас нет прав для выполнения этой команды.")
+        bot.send_message(message.chat.id, "⛔ У вас нет прав для выполнения этой команды.")
         return
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Добавить оплатившего", callback_data="admin_add_paid_user"))
-    markup.add(types.InlineKeyboardButton("Список оплативших", callback_data="admin_list_paid_users"))
-    markup.add(types.InlineKeyboardButton("Изменить срок оплаты", callback_data="admin_change_duration"))
-    markup.add(types.InlineKeyboardButton("Добавить администратора", callback_data="admin_add_admin"))
+    markup.add(types.InlineKeyboardButton("➕ Добавить оплатившего", callback_data="admin_add_paid_user"))
+    markup.add(types.InlineKeyboardButton("📋 Список оплативших", callback_data="admin_list_paid_users"))
+    markup.add(types.InlineKeyboardButton("⏳ Изменить срок оплаты", callback_data="admin_change_duration"))
+    markup.add(types.InlineKeyboardButton("👑 Добавить администратора", callback_data="admin_add_admin"))
     markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
-    bot.send_message(message.chat.id, "Админ-панель:", reply_markup=markup)
+    markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
+
+    bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
 
 # Обработчик callback-запросов админ-панели
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
@@ -653,6 +660,9 @@ def handle_admin_callback(call):
             bot.register_next_step_handler(call.message, add_admin_step)
         elif call.data == "admin_statistics":
             show_statistics_for_admin(call.message.chat.id)
+        elif call.data == "admin_delete_user_posts":
+            bot.send_message(call.message.chat.id, "🆔 Введите ID пользователя, чьи объявления нужно удалить:")
+            bot.register_next_step_handler(call.message, delete_user_posts_step)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_callback: {e}")
 
@@ -728,7 +738,7 @@ def show_paid_users(message):
         except Exception:
             user_name = f"(ID: {user_id})"
         
-        response += f"Пользователь {user_name}:\n"
+        response += f"👤 Пользователь {user_name} (ID: {user_id}):\n"
         for entry in entries:
             end_date = entry.get("end_date")
             if isinstance(end_date, str):
@@ -824,55 +834,60 @@ def get_admin_statistics():
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
-        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
+        bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
         return
 
     stats = get_admin_statistics()
     if not stats:
-        bot.send_message(chat_id, "Нет данных о публикациях.")
+        bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
         return
 
-    response = "📊 Статистика публикаций:\n"
+    response = "📊 *Статистика публикаций:*\n\n"
+
     for user_id, user_stats in stats.items():
-        user_name = f"ID {user_id}"
+        # Пробуем получить имя и ссылку
+        try:
+            user_info = bot.get_chat(user_id)
+            user_name = get_user_name(user_info)
+        except:
+            user_name = f"ID `{user_id}`"
 
         response += (
-            f"👤 {user_name}:\n"
-            f"• Опубликовано: {user_stats['published']}\n"
-            f"• Осталось: {user_stats['remaining']}\n"
+            f"👤 {user_name}\n"
+            f"📨 Опубликовано: *{user_stats['published']}*\n"
+            f"📉 Осталось: *{user_stats['remaining']}*\n"
         )
 
         if user_stats["details"]:
-            response += "  • Детали:\n"
+            response += "🧾 *Детали по сетям и городам:*\n"
             for network, cities in user_stats["details"].items():
                 for city, data in cities.items():
-                    end_date = None
+                    expire_str = "(неизвестно)"
                     for paid in paid_users.get(user_id, []):
-                        if (
-                            (paid.get("network") == network and paid.get("city") == city) or
-                            (paid.get("network") == "Все сети" and paid.get("city") == city)
-                        ):
+                        if ((paid.get("network") == network and paid.get("city") == city) or
+                            (paid.get("network") == "Все сети" and paid.get("city") == city)):
                             end_date = paid.get("end_date")
+                            if isinstance(end_date, str):
+                                try:
+                                    end_date = datetime.fromisoformat(end_date)
+                                except:
+                                    end_date = None
+                            if isinstance(end_date, datetime):
+                                expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
                             break
 
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except:
-                            end_date = None
-
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
-                    response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
+                    response += f"  └ 🧩 *{network}*, 📍*{city}* {expire_str}: *{data['published']} / {data['remaining']}*\n"
 
         if user_stats["links"]:
-            response += "  • Ссылки:\n"
-            for link in user_stats["links"]:
-                response += f"    - {link}\n"
+            unique_links = list(set(user_stats["links"]))
+            response += "🔗 *Ссылки на публикации:*\n"
+            for link in unique_links:
+                response += f"  • {link}\n"
 
         response += "\n"
 
     try:
-        bot.send_message(chat_id, response)
+        bot.send_message(chat_id, response, parse_mode="Markdown")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
 
@@ -1190,14 +1205,15 @@ def handle_new_post_choice(message):
 def handle_stats_button(message):
     try:
         stats = get_user_statistics(message.from_user.id)
+
         response = (
-            f"📊 Ваша статистика:\n"
-            f"• Опубликовано сегодня: {stats['published']}\n"
-            f"• Осталось публикаций: {stats['remaining']}\n"
+            f"📊 *Ваша статистика на сегодня:*\n"
+            f"📨 Опубликовано: *{stats['published']}*\n"
+            f"📉 Осталось публикаций: *{stats['remaining']}*\n"
         )
 
         if stats["details"]:
-            response += "\n📍 Детали по сетям:\n"
+            response += "\n🗂️ *Детали по сетям и городам:*\n"
             for network, cities in stats["details"].items():
                 for city, data in cities.items():
                     end_date = None
@@ -1215,70 +1231,68 @@ def handle_stats_button(message):
                         except:
                             end_date = None
 
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if isinstance(end_date, datetime) else "(неизвестно)"
+                    expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}" if isinstance(end_date, datetime) else "⏳ неизвестно"
+
                     response += (
-                        f"  └ {network}, {city} {expire_str}: "
-                        f"{data['published']} опубликовано, {data['remaining']} осталось\n"
+                        f"  └ 🧩 *{network}*, 📍*{city}* {expire_str}:\n"
+                        f"     • Опубликовано: *{data['published']}*, Осталось: *{data['remaining']}*\n"
                     )
 
-        bot.send_message(message.chat.id, response)
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"Произошла ошибка при получении статистики: {e}")
+        bot.send_message(message.chat.id, f"❌ Произошла ошибка при получении статистики: {e}")
 
-def show_statistics_for_admin(chat_id):
-    if not is_admin(chat_id):
-        bot.send_message(chat_id, "У вас нет прав для просмотра статистики.")
-        return
-
-    stats = get_admin_statistics()
-    if not stats:
-        bot.send_message(chat_id, "Нет данных о публикациях.")
-        return
-
-    response = "📊 Статистика публикаций:\n"
-    for user_id, user_stats in stats.items():
-        user_name = f"ID {user_id}"
-
-        response += (
-            f"👤 {user_name}:\n"
-            f"• Опубликовано: {user_stats['published']}\n"
-            f"• Осталось: {user_stats['remaining']}\n"
-        )
-
-        if user_stats["details"]:
-            response += "  • Детали:\n"
-            for network, cities in user_stats["details"].items():
-                for city, data in cities.items():
-                    end_date = None
-                    for paid in paid_users.get(user_id, []):
-                        if (
-                            (paid.get("network") == network and paid.get("city") == city) or
-                            (paid.get("network") == "Все сети" and paid.get("city") == city)
-                        ):
-                            end_date = paid.get("end_date")
-                            break
-
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except:
-                            end_date = None
-
-                    expire_str = f"(до {end_date.strftime('%d.%m.%Y')})" if end_date else "(неизвестно)"
-                    response += f"    - {network}, {city} {expire_str}: {data['published']} / {data['remaining']}\n"
-
-        if user_stats["links"]:
-            response += "  • Ссылки:\n"
-            for link in user_stats["links"]:
-                response += f"    - {link}\n"
-
-        response += "\n"
-
+def delete_user_posts_step(message):
     try:
-        bot.send_message(chat_id, response)
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
+        user_id = int(message.text)
+
+        if user_id not in user_posts or not user_posts[user_id]:
+            bot.send_message(message.chat.id, "❌ У пользователя нет объявлений.")
+            return
+
+        # Формируем список постов
+        preview = f"📋 Найдено *{len(user_posts[user_id])}* объявлений у пользователя ID `{user_id}`:\n\n"
+        for post in user_posts[user_id]:
+            date_str = format_time(post["time"])
+            preview += f"• 🧩 *{post['network']}* | 📍*{post['city']}* | 🕒 {date_str}\n"
+
+        # Кнопки: подтвердить / отменить
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Удалить все", callback_data=f"confirm_delete_{user_id}"))
+        markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_delete"))
+
+        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="Markdown")
+
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Введите корректный числовой ID.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete_") or call.data == "cancel_delete")
+def handle_delete_confirmation(call):
+    if call.data == "cancel_delete":
+        bot.edit_message_text("❌ Удаление отменено.", call.message.chat.id, call.message.message_id)
+        return
+
+    user_id = int(call.data.split("_")[-1])
+    deleted = 0
+
+    if user_id in user_posts:
+        for post in user_posts[user_id]:
+            try:
+                bot.delete_message(post["chat_id"], post["message_id"])
+                deleted += 1
+            except Exception as e:
+                print(f"[WARN] Не удалось удалить сообщение: {e}")
+
+        user_posts[user_id] = []
+        save_data()
+
+    bot.edit_message_text(
+        f"✅ Удалено *{deleted}* объявлений пользователя ID: `{user_id}`.",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="Markdown"
+    )
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
