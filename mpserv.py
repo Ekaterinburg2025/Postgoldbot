@@ -1216,6 +1216,7 @@ def select_network(message, text, media_type, file_id):
     selected_network = message.text
     if selected_network in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
+        
         if selected_network == "Мужской Клуб":
             cities = list(chat_ids_mk.keys())
         elif selected_network == "ПАРНИ 18+":
@@ -1223,13 +1224,15 @@ def select_network(message, text, media_type, file_id):
         elif selected_network == "НС":
             cities = list(chat_ids_ns.keys())
         elif selected_network == "Все сети":
-    # Только города, которые есть во всех сетях — пересечение
-    cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
+            # Только города, которые есть во всех сетях — пересечение
+            cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
+        
         for city in cities:
             markup.add(city)
         markup.add("Выбрать другую сеть", "Назад")
         bot.send_message(message.chat.id, "📍 Выберите город для публикации или нажмите 'Выбрать другую сеть':", reply_markup=markup)
         bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
+
     else:
         bot.send_message(message.chat.id, "❌ Ошибка! Выберите правильную сеть.")
         bot.register_next_step_handler(message, process_text)
