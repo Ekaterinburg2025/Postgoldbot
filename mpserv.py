@@ -530,52 +530,56 @@ def save_data(retries=3, delay=0.5):
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
-                    # Очистка
+                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # ✅ Сохранение оплативших
+                    # ✅ Сохранение оплативших пользователей
                     for user_id, entries in paid_users.items():
                         for entry in entries:
                             end = entry.get("end_date")
-
                             if isinstance(end, str):
                                 try:
                                     end = datetime.fromisoformat(end)
                                 except:
-                                    end = now_ekb()  # fallback
-
+                                    end = now_ekb()
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], end.isoformat()))
 
-                    # Сохранение админов
+                    # ✅ Сохранение админов
                     for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # Сохранение постов
+                    # ✅ Сохранение публикаций
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
-                                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                INSERT INTO user_posts (user_id, network, city, time, chat_id, message_id, deleted)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (
-                                user_id, post["network"], post["city"],
-                                post["time"], post["chat_id"], post["message_id"]
-				int(post.get("deleted", False))  # 👈 вот это
+                                user_id,
+                                post["network"],
+                                post["city"],
+                                post["time"],
+                                post["chat_id"],
+                                post["message_id"],
+                                int(post.get("deleted", False))  # ✅ Сохраняем как 0 или 1
                             ))
 
                     conn.commit()
                     print("[✅ SAVE] Успешно сохранено в bot_data.db")
 
-                    # 📨 Сообщение в ТГ
-                    bot.send_message(ADMIN_CHAT_ID,
+                    # 💬 Отправка уведомления админу
+                    bot.send_message(
+                        ADMIN_CHAT_ID,
                         f"✅ *Сохранено в базу:*\n👤 Оплативших: *{len(paid_users)}*\n📬 Постов: *{len(user_posts)}*\n👮 Админов: *{len(admins)}*",
                         parse_mode="Markdown"
                     )
                     return
+
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
                     print("[⏳ SAVE] База занята, пробуем снова...")
@@ -584,6 +588,7 @@ def save_data(retries=3, delay=0.5):
                 else:
                     print(f"[❌ SAVE] SQLite ошибка: {e}")
                     break
+
             except Exception as ex:
                 print(f"[❌ SAVE] Ошибка при сохранении: {ex}")
                 break
