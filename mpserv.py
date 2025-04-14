@@ -926,18 +926,18 @@ def show_paid_users(message):
         for entry in entries:
             network = entry.get("network")
             city = entry.get("city")
-
-            # Нормализуем сеть
             net_key = normalize_network_key(network)
-            group_title = city  # fallback
 
-            city_data = all_cities.get(city)
-            if city_data and net_key in city_data:
-                first_group = city_data[net_key]
-                if isinstance(first_group, list) and first_group:
-                    group_title = first_group[0].get("name", city)
+            # Получаем все названия групп, если город связан с несколькими чатами
+            city_names = []
+            if all_cities.get(city) and net_key in all_cities[city]:
+                city_names = [group["name"] for group in all_cities[city][net_key]]
+            else:
+                city_names = [city]  # fallback
 
-            # Обработка даты
+            city_display = ", ".join(city_names)
+
+            # Дата
             end_date = entry.get("end_date")
             if isinstance(end_date, str):
                 try:
@@ -947,10 +947,9 @@ def show_paid_users(message):
 
             date_str = end_date.strftime("%d.%m.%Y %H:%M") if isinstance(end_date, datetime) else "неизвестно"
 
-            response += f" - Сеть: {network}, Город: {group_title}, Срок: {date_str}\n"
+            response += f" - Сеть: {network}, Город: {city_display}, Срок: {date_str}\n"
 
     bot.send_message(message.chat.id, response)
-
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("change_duration_"))
 def handle_duration_change(call):
@@ -982,42 +981,6 @@ def handle_duration_change(call):
         print(f"Ошибка в handle_duration_change: {e}")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка при изменении срока.")
 
-def get_admin_statistics():
-    statistics = {}
-
-    for user_id, networks in user_daily_posts.items():
-        stats = {"published": 0, "remaining": 0, "details": {}, "links": []}
-        limit_total = 0
-
-        for network, cities in networks.items():
-            stats["details"][network] = {}
-            for city, post_data in cities.items():
-                active_posts = len(post_data.get("posts", []))
-                deleted_posts = len(post_data.get("deleted_posts", []))
-                total_posts = active_posts + deleted_posts
-
-                limit_total += 3
-
-                stats["details"][network][city] = {
-                    "published": total_posts,
-                    "remaining": max(0, 3 - total_posts)
-                }
-
-                stats["published"] += total_posts
-
-                for post in post_data.get("posts", []):
-                    if isinstance(post, datetime) and is_today(post):
-                        for user_post in user_posts.get(user_id, []):
-                            if user_post["network"] == network and user_post["city"] == city:
-                                stats.setdefault("links", []).append(
-                                    f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
-                                )
-
-        stats["remaining"] = max(0, limit_total - stats["published"])
-        statistics[user_id] = stats
-
-    return statistics
-
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
@@ -1032,7 +995,6 @@ def show_statistics_for_admin(chat_id):
     response = "📊 *Статистика публикаций:*\n\n"
 
     for user_id, user_stats in stats.items():
-        # Пробуем получить имя и ссылку
         try:
             user_info = bot.get_chat(user_id)
             user_name = get_user_name(user_info)
@@ -1048,11 +1010,15 @@ def show_statistics_for_admin(chat_id):
         if user_stats["details"]:
             response += "🧾 *Детали по сетям и городам:*\n"
             for network, cities in user_stats["details"].items():
+                net_key = normalize_network_key(network)
                 for city, data in cities.items():
+                    # 🗓 Поиск даты окончания доступа
                     expire_str = "(неизвестно)"
                     for paid in paid_users.get(user_id, []):
-                        if ((paid.get("network") == network and paid.get("city") == city) or
-                            (paid.get("network") == "Все сети" and paid.get("city") == city)):
+                        if (
+                            normalize_network_key(paid.get("network")) == net_key and
+                            paid.get("city") == city
+                        ):
                             end_date = paid.get("end_date")
                             if isinstance(end_date, str):
                                 try:
@@ -1063,7 +1029,16 @@ def show_statistics_for_admin(chat_id):
                                 expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
                             break
 
-                    response += f"  └ 🧩 *{network}*, 📍*{city}* {expire_str}: *{data['published']} / {data['remaining']}*\n"
+                    # 🏙 Уточняем названия всех городов (если чатов несколько)
+                    location_names = []
+                    for loc in all_cities.get(city, {}).get(net_key, []):
+                        location_names.append(loc["name"])
+                    location_str = ", ".join(location_names) if location_names else city
+
+                    response += (
+                        f"  └ 🧩 *{network}*, 📍*{city}* → {location_str} {expire_str}: "
+                        f"*{data['published']} / {data['remaining']}*\n"
+                    )
 
         if user_stats["links"]:
             unique_links = list(set(user_stats["links"]))
@@ -1308,18 +1283,18 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     user_name = get_user_name(message.from_user)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
+    was_published = False
+
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
 
         if not city_data:
-            continue  # Город отсутствует в сети
+            continue
 
-        # Проверка оплаты
         if not is_user_paid(user_id, network, city):
             continue
 
-        # Лимит
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
@@ -1339,18 +1314,16 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
 
-                # user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
                     "message_id": sent_message.message_id,
                     "chat_id": chat_id,
                     "time": now_ekb(),
-                    "city": city,
+                    "city": location["name"],
                     "network": network
                 })
 
-                # user_daily_posts
                 if user_id not in user_daily_posts:
                     user_daily_posts[user_id] = {}
                 if network not in user_daily_posts[user_id]:
@@ -1361,9 +1334,18 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
 
                 bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {location['name']}.")
+                was_published = True
 
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
+
+    if not was_published:
+        markup = types.InlineKeyboardMarkup()
+        if selected_network == "Мужской Клуб":
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
+        else:
+            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
+        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
     ask_for_new_post(message)
 
@@ -1387,7 +1369,8 @@ def handle_new_post_choice(message):
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
     try:
-        stats = get_user_statistics(message.from_user.id)
+        user_id = message.from_user.id
+        stats = get_user_statistics(user_id)
 
         response = (
             f"📊 *Ваша статистика на сегодня:*\n"
@@ -1398,26 +1381,31 @@ def handle_stats_button(message):
         if stats["details"]:
             response += "\n🗂️ *Детали по сетям и городам:*\n"
             for network, cities in stats["details"].items():
+                net_key = normalize_network_key(network)
                 for city, data in cities.items():
-                    end_date = None
-                    for paid in paid_users.get(message.from_user.id, []):
-                        if (
-                            (paid["network"] == network and paid["city"] == city) or
-                            (paid["network"] == "Все сети" and paid["city"] == city)
-                        ):
-                            end_date = paid.get("end_date")
+                    expire_str = "⏳ неизвестно"
+
+                    # Найдём дату окончания
+                    for paid in paid_users.get(user_id, []):
+                        if normalize_network_key(paid["network"]) == net_key and paid["city"] == city:
+                            end = paid.get("end_date")
+                            if isinstance(end, str):
+                                try:
+                                    end = datetime.fromisoformat(end)
+                                except:
+                                    end = None
+                            if isinstance(end, datetime):
+                                expire_str = f"⏳ до {end.strftime('%d.%m.%Y')}"
                             break
 
-                    if isinstance(end_date, str):
-                        try:
-                            end_date = datetime.fromisoformat(end_date)
-                        except:
-                            end_date = None
-
-                    expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}" if isinstance(end_date, datetime) else "⏳ неизвестно"
+                    # Уточнение: какие чаты покрываются
+                    location_names = []
+                    for loc in all_cities.get(city, {}).get(net_key, []):
+                        location_names.append(loc["name"])
+                    location_str = ", ".join(location_names) if location_names else city
 
                     response += (
-                        f"  └ 🧩 *{network}*, 📍*{city}* {expire_str}:\n"
+                        f"  └ 🧩 *{network}*, 📍*{city}* → {location_str} {expire_str}:\n"
                         f"     • Опубликовано: *{data['published']}*, Осталось: *{data['remaining']}*\n"
                     )
 
