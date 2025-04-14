@@ -154,7 +154,9 @@ def load_data():
 init_db()
 paid_users, admins, user_posts = load_data()
 
-# Списки chat_id для каждой сети и города
+# 🧠 Автогенерация all_cities на основе chat_ids_* и учёта особых случаев
+
+# Старые словари:
 chat_ids_mk = {
     "Екатеринбург": -1002210043742,
     "Челябинск": -1002238514762,
@@ -192,11 +194,10 @@ chat_ids_parni = {
     "Курган": -1002469285352,
     "ХМАО": -1002287709568,
     "Уфа": -1002448909000,
-    "Новосибирск": -1002261777025,  # Обновленный ID для группы "Парни Новосибирск"
+    "Новосибирск": -1002261777025,
     "ЯМАО": -1002371438340
 }
 
-# ДОБАВЛЯЕМ новую сеть НС с нужными группами
 chat_ids_ns = {
     "Курган": -1001465465654,
     "Новосибирск": -1001824149334,
@@ -206,15 +207,48 @@ chat_ids_ns = {
     "Ямал": -1002145851794,
     "Москва": -1001938448310,
     "ХМАО": -1001442597049,
-    "Знакомства 66": -1002169473861,   # Привязано к Екатеринбургу
-    "Знакомства 74": -1002193127380    # Привязано к Челябинску
+    "Знакомства 66": -1002169473861,
+    "Знакомства 74": -1002193127380
 }
 
-# Словарь для замены названий городов для сети НС
-ns_city_substitution = {
-    "Екатеринбург": "Знакомства 66",
-    "Челябинск": "Знакомства 74"
-}
+# Нормализация названий (объединение Перми/Пермь, ЯМАО/Ямал и пр.)
+def normalize_city_name(name):
+    mapping = {
+        "Перми": "Пермь",
+        "ЯМАО": "Ямал",
+        "Знакомства 66": "Екатеринбург",
+        "Знакомства 74": "Челябинск"
+    }
+    return mapping.get(name, name)
+
+# Автоматическая сборка all_cities
+all_cities = {}
+
+def insert_to_all(city, net, real_name, chat_id):
+    norm = normalize_city_name(city)
+    if norm not in all_cities:
+        all_cities[norm] = {}
+    if net not in all_cities[norm]:
+        all_cities[norm][net] = []
+    all_cities[norm][net].append({"name": real_name, "chat_id": chat_id})
+
+for city, chat_id in chat_ids_mk.items():
+    insert_to_all(city, "mk", city, chat_id)
+
+for city, chat_id in chat_ids_parni.items():
+    insert_to_all(city, "parni", city, chat_id)
+
+for city, chat_id in chat_ids_ns.items():
+    insert_to_all(city, "ns", city, chat_id)
+
+# Добавим fallback-группу МК для Тюмени, Ямала и ХМАО если её там нет
+fallback_mk = {"Тюмень", "Ямал", "ХМАО"}
+for city in fallback_mk:
+    if "mk" not in all_cities.get(city, {}):
+        insert_to_all(city, "mk", "Общая группа Тюмень и Север", -1002210623988)
+
+# Итог: all_cities готов
+print(f"📦 Сформировано {len(all_cities)} городов")
 
 # Статичные подписи для каждой сети
 network_signatures = {
@@ -485,36 +519,44 @@ def is_today(timestamp):
         return False
 
 def check_payment(user_id, network, city):
-    """Проверяет, оплатил ли пользователь доступ к сети и городу."""
-    if str(user_id) not in paid_users:
+    """Проверяет, оплатил ли пользователь доступ к сети и городу (с учетом all_cities и НС)."""
+    user_id = str(user_id)  # на всякий случай
+    if user_id not in paid_users:
         print(f"[DEBUG] Пользователь {user_id} не найден в оплативших.")
         return False
 
-    for payment in paid_users[str(user_id)]:
-        # Пропускаем просроченные
-        if payment["expiry_date"] < now_ekb():
-            print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
+    # Получаем ключ сети
+    net_map = {"Мужской Клуб": "mk", "ПАРНИ 18+": "parni", "НС": "ns"}
+    net_key = net_map.get(network)
+
+    for payment in paid_users[user_id]:
+        expiry = payment.get("end_date")
+        if isinstance(expiry, str):
+            try:
+                expiry = datetime.fromisoformat(expiry)
+            except:
+                continue
+
+        if not isinstance(expiry, datetime) or expiry < now_ekb():
+            print(f"[DEBUG] Срок оплаты истёк у {user_id}: {payment}")
             continue
 
-        # ✅ Если оплачен доступ ко всем сетям в нужном городе
+        # ✅ Все сети — подходит если город совпадает
         if payment["network"] == "Все сети" and payment["city"] == city:
             print(f"[DEBUG] ✅ Все сети: доступ в {network} / {city}")
             return True
 
-        # ✅ Если оплачен доступ к нужной сети и городу
+        # ✅ Конкретная сеть и город
         if payment["network"] == network and payment["city"] == city:
-            print(f"[DEBUG] ✅ Конкретная сеть: {network} / {city}")
+            print(f"[DEBUG] ✅ Сеть: {network} / {city}")
             return True
 
-        # ✅ Специально для НС
-        ns_variants = ["НС", "Знакомства 66", "Знакомства 74"]
-        if (
-            network in ns_variants
-            and payment["network"] == "Все сети"
-            and payment["city"] == city
-        ):
-            print(f"[DEBUG] ✅ НС особый случай: {network} / {city} от Все сети")
-            return True
+        # ✅ Особый случай: НС — подставной город
+        if network == "НС" and payment["network"] == "Все сети":
+            variants = [city, ns_city_substitution.get(city)]
+            if payment["city"] in variants:
+                print(f"[DEBUG] ✅ НС через подстановку: {network} / {city}")
+                return True
 
     print(f"[DEBUG] ❌ Нет доступа у {user_id} к {network} / {city}")
     return False
@@ -805,58 +847,54 @@ def select_network_for_payment(message, user_id):
         return
 
     network = message.text
-    if network in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        if network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif network == "НС":
-            cities = list(chat_ids_ns.keys())
-        else:
-            cities = list(set(list(chat_ids_mk.keys()) + list(chat_ids_parni.keys()) + list(chat_ids_ns.keys())))
-        for city in cities:
-            markup.add(city)
-        markup.add("Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
-        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
-    else:
-        bot.send_message(message.chat.id, " Ошибка! Выберите правильную сеть.")
-        bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
-
-def select_city_for_payment(message, user_id, network):
-    if message.text == "Назад":
-        bot.send_message(message.chat.id, "️ Выберите сеть для добавления пользователя:", reply_markup=get_network_markup())
+    if network not in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
+        bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильную сеть.")
         bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
         return
 
-    # ⬇️ Выбираем города по сети
-    if network == "Мужской Клуб":
-        cities = list(chat_ids_mk.keys())
-    elif network == "ПАРНИ 18+":
-        cities = list(chat_ids_parni.keys())
-    elif network == "НС":
-        cities = list(chat_ids_ns.keys())
-    elif network == "Все сети":
-        # 📌 Пересекаем все списки — показываем только общие города
-        cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
-    else:
-        cities = []
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
+    network_key = normalize_network_key(network)
 
-    # Проверка: выбранный город допустим?
+    if network == "Все сети":
+        # Только города, где хотя бы 2+ сетей доступны
+        cities = [city for city, data in all_cities.items() if len(data.keys()) >= 2]
+    else:
+        cities = [city for city, data in all_cities.items() if network_key in data]
+
+    for city in cities:
+        markup.add(city)
+    markup.add("Назад")
+    bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
+    bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
+
+def select_city_for_payment(message, user_id, network):
+    if message.text == "Назад":
+        bot.send_message(message.chat.id, "️Выберите сеть для добавления пользователя:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
+        return
+
     city = message.text
-    if city not in cities:
+    network_key = normalize_network_key(network)
+
+    # Повторно получаем список допустимых городов для проверки
+    if network == "Все сети":
+        allowed_cities = [c for c, d in all_cities.items() if len(d.keys()) >= 2]
+    else:
+        allowed_cities = [c for c, d in all_cities.items() if network_key in d]
+
+    if city not in allowed_cities:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        markup.add(*cities)
+        for c in allowed_cities:
+            markup.add(c)
         markup.add("Назад")
         bot.send_message(message.chat.id, "📍 Пожалуйста, выберите город из списка:", reply_markup=markup)
         bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
         return
 
-    # Продолжение — выбор срока
+    # Всё ок — идём дальше
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
     markup.add("День", "Неделя", "Месяц")
-    bot.send_message(message.chat.id, " Выберите срок оплаты:", reply_markup=markup)
+    bot.send_message(message.chat.id, "⏳ Выберите срок оплаты:", reply_markup=markup)
     bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
 
 # Функция для добавления администратора
@@ -875,16 +913,31 @@ def show_paid_users(message):
         bot.send_message(message.chat.id, "Нет данных об оплативших пользователях.")
         return
 
-    response = "Список оплативших пользователей:\n"
+    response = "📋 Список оплативших пользователей:\n"
     for user_id, entries in paid_users.items():
         try:
             user_info = bot.get_chat(user_id)
             user_name = get_user_name(user_info)
         except Exception:
             user_name = f"(ID: {user_id})"
-        
-        response += f"👤 Пользователь {user_name} (ID: {user_id}):\n"
+
+        response += f"\n👤 Пользователь {user_name} (ID: {user_id}):\n"
+
         for entry in entries:
+            network = entry.get("network")
+            city = entry.get("city")
+
+            # Нормализуем сеть
+            net_key = normalize_network_key(network)
+            group_title = city  # fallback
+
+            city_data = all_cities.get(city)
+            if city_data and net_key in city_data:
+                first_group = city_data[net_key]
+                if isinstance(first_group, list) and first_group:
+                    group_title = first_group[0].get("name", city)
+
+            # Обработка даты
             end_date = entry.get("end_date")
             if isinstance(end_date, str):
                 try:
@@ -892,26 +945,14 @@ def show_paid_users(message):
                 except:
                     end_date = None
 
-            if isinstance(end_date, datetime):
-                date_str = end_date.strftime('%d.%m.%Y %H:%M')
-            else:
-                date_str = "неизвестно"
+            date_str = end_date.strftime("%d.%m.%Y %H:%M") if isinstance(end_date, datetime) else "неизвестно"
 
-            response += f" - Сеть: {entry['network']}, Город: {entry['city']}, Срок: {date_str}\n"
+            response += f" - Сеть: {network}, Город: {group_title}, Срок: {date_str}\n"
 
     bot.send_message(message.chat.id, response)
 
-def get_all_cities_for_network(network):
-    if network == "Мужской Клуб":
-        return list(chat_ids_mk.keys())
-    elif network == "ПАРНИ 18+":
-        return list(chat_ids_parni.keys())
-    elif network == "НС":
-        return list(chat_ids_ns.keys())
-    elif network == "Все сети":
-        return list(set(chat_ids_mk.keys()) | set(chat_ids_parni.keys()) | set(chat_ids_ns.keys()))
-    return []
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("change_duration_"))
 def handle_duration_change(call):
     try:
         data = call.data.split("_")
@@ -936,9 +977,10 @@ def handle_duration_change(call):
         save_data()
         bot.answer_callback_query(call.id, f"✅ Срок изменён на {days} дней.")
         show_paid_users(call.message)
+
     except Exception as e:
         print(f"Ошибка в handle_duration_change: {e}")
-        bot.answer_callback_query(call.id, " Произошла ошибка при изменении срока.")
+        bot.answer_callback_query(call.id, "❌ Произошла ошибка при изменении срока.")
 
 def get_admin_statistics():
     statistics = {}
@@ -1207,6 +1249,16 @@ def get_network_markup():
     markup.add("Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети", "Назад")
     return markup
 
+def normalize_network_key(name):
+    """Приводим название сети к ключу all_cities: mk, parni, ns"""
+    if name == "Мужской Клуб":
+        return "mk"
+    elif name == "ПАРНИ 18+":
+        return "parni"
+    elif name in ["НС", "Знакомства 66", "Знакомства 74"]:
+        return "ns"
+    return None
+
 def select_network(message, text, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "Напишите текст объявления:")
@@ -1216,21 +1268,24 @@ def select_network(message, text, media_type, file_id):
     selected_network = message.text
     if selected_network in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-        
-        if selected_network == "Мужской Клуб":
-            cities = list(chat_ids_mk.keys())
-        elif selected_network == "ПАРНИ 18+":
-            cities = list(chat_ids_parni.keys())
-        elif selected_network == "НС":
-            cities = list(chat_ids_ns.keys())
-        elif selected_network == "Все сети":
-            # Только города, которые есть во всех сетях — пересечение
-            cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
-        
+
+        if selected_network == "Все сети":
+            # Только города, которые есть минимум в 2 сетях
+            cities = [city for city, nets in all_cities.items() if len(nets) >= 2]
+        else:
+            # Показываем города только из выбранной сети
+            key = normalize_network_key(selected_network)
+            cities = [city for city, nets in all_cities.items() if key in nets]
+
         for city in cities:
             markup.add(city)
         markup.add("Выбрать другую сеть", "Назад")
-        bot.send_message(message.chat.id, "📍 Выберите город для публикации или нажмите 'Выбрать другую сеть':", reply_markup=markup)
+
+        bot.send_message(
+            message.chat.id,
+            "📍 Выберите город для публикации или нажмите 'Выбрать другую сеть':",
+            reply_markup=markup
+        )
         bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
 
     else:
@@ -1251,85 +1306,64 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
-
-    # Проверка доступа
-    if not is_user_paid(user_id, selected_network, city):
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
-        return
-
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     for network in networks:
-        # Пропускаем, если нет оплаты по конкретной сети
+        net_key = normalize_network_key(network)
+        city_data = all_cities.get(city, {}).get(net_key)
+
+        if not city_data:
+            continue  # Город отсутствует в сети
+
+        # Проверка оплаты
         if not is_user_paid(user_id, network, city):
             continue
 
-        # Проверка лимита по конкретной сети и городу
+        # Лимит
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
             bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для {network}, город {city}")
             continue
 
-        # Подпись для сети
         signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        if network == "Мужской Клуб":
-            chat_dict = chat_ids_mk
-        elif network == "ПАРНИ 18+":
-            chat_dict = chat_ids_parni
-        elif network == "НС":
-            chat_dict = chat_ids_ns
-        else:
-            continue
+        for location in city_data:
+            chat_id = location["chat_id"]
+            try:
+                if media_type == "photo":
+                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                elif media_type == "video":
+                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                else:
+                    sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
 
-        # Обработка города
-        if network == "НС" and city not in chat_dict and city in ns_city_substitution:
-            substitute_city = ns_city_substitution[city]
-            chat_id = chat_dict.get(substitute_city)
-        else:
-            chat_id = chat_dict.get(city)
+                # user_posts
+                if user_id not in user_posts:
+                    user_posts[user_id] = []
+                user_posts[user_id].append({
+                    "message_id": sent_message.message_id,
+                    "chat_id": chat_id,
+                    "time": now_ekb(),
+                    "city": city,
+                    "network": network
+                })
 
-        if not chat_id:
-            bot.send_message(message.chat.id, f"❌ Город '{city}' не найден в сети «{network}».")
-            continue
+                # user_daily_posts
+                if user_id not in user_daily_posts:
+                    user_daily_posts[user_id] = {}
+                if network not in user_daily_posts[user_id]:
+                    user_daily_posts[user_id][network] = {}
+                if city not in user_daily_posts[user_id][network]:
+                    user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
 
-        try:
-            if media_type == "photo":
-                sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="Markdown")
-            elif media_type == "video":
-                sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="Markdown")
-            else:
-                sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
+                user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
 
-            # user_posts
-            if user_id not in user_posts:
-                user_posts[user_id] = []
-            user_posts[user_id].append({
-                "message_id": sent_message.message_id,
-                "chat_id": chat_id,
-                "time": now_ekb(),
-                "city": city,
-                "network": network
-            })
+                bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {location['name']}.")
 
-            # user_daily_posts
-            if user_id not in user_daily_posts:
-                user_daily_posts[user_id] = {}
-            if network not in user_daily_posts[user_id]:
-                user_daily_posts[user_id][network] = {}
-            if city not in user_daily_posts[user_id][network]:
-                user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
-
-            user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
-
-            bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {city}.")
-
-        except telebot.apihelper.ApiTelegramException as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
+            except telebot.apihelper.ApiTelegramException as e:
+                bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
 
     ask_for_new_post(message)
 
