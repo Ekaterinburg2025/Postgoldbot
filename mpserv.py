@@ -138,11 +138,45 @@ def load_data():
                         "deleted": bool(deleted)
                     })
 
-                # Глобальные переменные
-                global paid_users, admins, user_posts
+                # ⬇️ Восстанавливаем переменные
+                global paid_users, admins, user_posts, user_daily_posts
                 paid_users = local_paid_users
                 admins = local_admins
                 user_posts = local_user_posts
+
+                # 🔁 Восстановление user_daily_posts из user_posts
+                from collections import defaultdict
+                user_daily_posts = {}
+
+                for user_id, posts in user_posts.items():
+                    for post in posts:
+                        network = post["network"]
+                        city = post["city"]
+                        time = post["time"]
+                        is_deleted = post.get("deleted", False)
+
+                        if isinstance(time, str):
+                            try:
+                                time = datetime.fromisoformat(time)
+                            except:
+                                continue
+
+                        if time.date() != now_ekb().date():
+                            continue  # только сегодняшние посты
+
+                        if user_id not in user_daily_posts:
+                            user_daily_posts[user_id] = defaultdict(lambda: defaultdict(lambda: {
+                                "posts": [],
+                                "deleted_posts": [],
+                                "last_post_time": None
+                            }))
+
+                        user_daily_posts[user_id][network][city]["last_post_time"] = time
+
+                        if is_deleted:
+                            user_daily_posts[user_id][network][city]["deleted_posts"].append(time)
+                        else:
+                            user_daily_posts[user_id][network][city]["posts"].append(time)
 
                 return paid_users, admins, user_posts
 
