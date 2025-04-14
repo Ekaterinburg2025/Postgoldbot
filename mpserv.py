@@ -518,6 +518,55 @@ def is_today(timestamp):
     except:
         return False
 
+def get_admin_statistics():
+    statistics = {}
+
+    for user_id, networks in user_daily_posts.items():
+        stats = {
+            "published": 0,
+            "remaining": 0,
+            "details": {},
+            "links": []
+        }
+        limit_total = 0
+        links = set()  # чтобы избежать дубликатов
+
+        for network, cities in networks.items():
+            stats["details"][network] = {}
+
+            for city, post_data in cities.items():
+                active_posts = len(post_data.get("posts", []))
+                deleted_posts = len(post_data.get("deleted_posts", []))
+                total_posts = active_posts + deleted_posts
+
+                limit_total += 3  # по 3 публикации на каждую пару сеть+город
+
+                stats["details"][network][city] = {
+                    "published": total_posts,
+                    "remaining": max(0, 3 - total_posts)
+                }
+
+                stats["published"] += total_posts
+
+                # Ищем ссылки на сегодняшние посты
+                for post_time in post_data.get("posts", []):
+                    if isinstance(post_time, datetime) and post_time.date() == now_ekb().date():
+                        for user_post in user_posts.get(user_id, []):
+                            if (
+                                user_post["network"] == network and
+                                user_post["city"] == city and
+                                isinstance(user_post.get("time"), datetime) and
+                                user_post["time"].date() == now_ekb().date()
+                            ):
+                                link = f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
+                                links.add(link)
+
+        stats["remaining"] = max(0, limit_total - stats["published"])
+        stats["links"] = list(links)
+        statistics[user_id] = stats
+
+    return statistics
+
 def check_payment(user_id, network, city):
     """Проверяет, оплатил ли пользователь доступ к сети и городу (с учетом all_cities и НС)."""
     user_id = str(user_id)  # на всякий случай
