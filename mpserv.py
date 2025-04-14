@@ -504,10 +504,7 @@ def check_payment(user_id, network, city):
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
-    print(f"[💾 SAVE] Начинаем сохранение:")
-    print(f"  - Оплативших: {len(paid_users)}")
-    print(f"  - Постов: {len(user_posts)}")
-    print(f"  - Админов: {len(admins)}")
+    print(f"[💾 SAVE] Оплативших: {len(paid_users)}, Постов: {len(user_posts)}, Админов: {len(admins)}")
 
     for attempt in range(retries):
         with db_lock:
@@ -515,29 +512,32 @@ def save_data(retries=3, delay=0.5):
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
-                    # Очистка таблиц
+                    # Очистка
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
 
-                    # Сохранение оплативших пользователей
+                    # ✅ Сохранение оплативших
                     for user_id, entries in paid_users.items():
                         for entry in entries:
+                            end = entry.get("end_date")
+
+                            if isinstance(end, str):
+                                try:
+                                    end = datetime.fromisoformat(end)
+                                except:
+                                    end = now_ekb()  # fallback
+
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
-                            """, (
-                                user_id,
-                                entry["network"],
-                                entry["city"],
-                                entry["end_date"].isoformat()
-                            ))
+                            """, (user_id, entry["network"], entry["city"], end.isoformat()))
 
                     # Сохранение админов
                     for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # Сохранение публикаций
+                    # Сохранение постов
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
@@ -549,17 +549,13 @@ def save_data(retries=3, delay=0.5):
                             ))
 
                     conn.commit()
-                    print("[✅ SAVE] Успешно записано в bot_data.db")
+                    print("[✅ SAVE] Успешно сохранено в bot_data.db")
 
-                    # 📨 Уведомление в Telegram
-                    message = (
-                        "✅ *Сохранение завершено:*\n"
-                        f"👤 Пользователей: *{len(paid_users)}*\n"
-                        f"📬 Постов: *{len(user_posts)}*\n"
-                        f"👮 Админов: *{len(admins)}*"
+                    # 📨 Сообщение в ТГ
+                    bot.send_message(ADMIN_CHAT_ID,
+                        f"✅ *Сохранено в базу:*\n👤 Оплативших: *{len(paid_users)}*\n📬 Постов: *{len(user_posts)}*\n👮 Админов: *{len(admins)}*",
+                        parse_mode="Markdown"
                     )
-                    bot.send_message(ADMIN_CHAT_ID, message, parse_mode="Markdown")
-
                     return
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower():
@@ -567,10 +563,10 @@ def save_data(retries=3, delay=0.5):
                     time.sleep(delay)
                     continue
                 else:
-                    print(f"[❌ SAVE] Ошибка SQLite: {e}")
+                    print(f"[❌ SAVE] SQLite ошибка: {e}")
                     break
             except Exception as ex:
-                print(f"[❌ SAVE] Неизвестная ошибка: {ex}")
+                print(f"[❌ SAVE] Ошибка при сохранении: {ex}")
                 break
 
 @bot.message_handler(commands=['start'])
@@ -1411,12 +1407,12 @@ if __name__ == '__main__':
     init_db()
     paid_users, admins, user_posts = load_data()
 
-    # 🛡 Добавляем CORE_ADMINS, если их нет
+    # 🔁 Добавляем вечных админов, если их нет
     for core_admin in CORE_ADMINS:
         if core_admin not in admins:
             admins.append(core_admin)
 
-    save_data()  # 💾 Обновляем базу, чтобы не слетали при следующем запуске
+    save_data()  # 💾 Сохраняем всё — теперь точно!
 
     schedule_auto_backup()
     port = int(os.environ.get('PORT', 8080))
