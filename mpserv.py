@@ -52,6 +52,7 @@ def init_db():
     with db_lock:
         with sqlite3.connect("bot_data.db") as conn:
             cur = conn.cursor()
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS paid_users (
                     user_id INTEGER,
@@ -60,11 +61,13 @@ def init_db():
                     end_date TEXT
                 )
             """)
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS admin_users (
                     user_id INTEGER PRIMARY KEY
                 )
             """)
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_posts (
                     user_id INTEGER,
@@ -72,9 +75,17 @@ def init_db():
                     city TEXT,
                     time TEXT,
                     chat_id INTEGER,
-                    message_id INTEGER
+                    message_id INTEGER,
+                    deleted INTEGER DEFAULT 0
                 )
             """)
+
+            # ⚠️ Если таблица уже существовала, добавим колонку deleted вручную (миграция)
+            try:
+                cur.execute("ALTER TABLE user_posts ADD COLUMN deleted INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # колонка уже есть — пропускаем
+
             conn.commit()
 
 # Загрузка данных из базы данных
@@ -91,15 +102,9 @@ def load_data():
                     if user_id not in local_paid_users:
                         local_paid_users[user_id] = []
 
-                    # Приводим end_date к datetime
-                    if isinstance(end_date, datetime):
-                        parsed_date = end_date
-                    elif isinstance(end_date, str):
-                        try:
-                            parsed_date = datetime.fromisoformat(end_date)
-                        except:
-                            parsed_date = None
-                    else:
+                    try:
+                        parsed_date = datetime.fromisoformat(end_date)
+                    except:
                         parsed_date = None
 
                     local_paid_users[user_id].append({
@@ -112,25 +117,28 @@ def load_data():
                 cur.execute("SELECT user_id FROM admin_users")
                 local_admins = [row[0] for row in cur.fetchall()]
 
-                # Загружаем публикации
-                cur.execute("SELECT user_id, network, city, time, chat_id, message_id FROM user_posts")
+                # Загружаем публикации с флагом deleted
+                cur.execute("SELECT user_id, network, city, time, chat_id, message_id, deleted FROM user_posts")
                 local_user_posts = {}
-                for user_id, network, city, time_str, chat_id, message_id in cur.fetchall():
+                for user_id, network, city, time_str, chat_id, message_id, deleted in cur.fetchall():
                     if user_id not in local_user_posts:
                         local_user_posts[user_id] = []
+
                     try:
                         post_time = datetime.fromisoformat(time_str)
                     except:
                         post_time = now_ekb()
+
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
                         "time": post_time,
                         "city": city,
-                        "network": network
+                        "network": network,
+                        "deleted": bool(deleted)
                     })
 
-                # Заменяем глобальные переменные
+                # Глобальные переменные
                 global paid_users, admins, user_posts
                 paid_users = local_paid_users
                 admins = local_admins
@@ -483,22 +491,32 @@ def check_payment(user_id, network, city):
         return False
 
     for payment in paid_users[str(user_id)]:
-        # Проверяем, не истёк ли срок оплаты
+        # Пропускаем просроченные
         if payment["expiry_date"] < now_ekb():
             print(f"[DEBUG] Срок оплаты истёк для пользователя {user_id}: {payment}")
-            continue  # Пропускаем истёкшие платежи
+            continue
 
-        # Если оплачен доступ ко всем сетям для этого города
+        # ✅ Если оплачен доступ ко всем сетям в нужном городе
         if payment["network"] == "Все сети" and payment["city"] == city:
-            print(f"[DEBUG] Пользователь {user_id} оплатил доступ ко всем сетям для города {city}.")
+            print(f"[DEBUG] ✅ Все сети: доступ в {network} / {city}")
             return True
 
-        # Если оплачен доступ к конкретной сети и городу
+        # ✅ Если оплачен доступ к нужной сети и городу
         if payment["network"] == network and payment["city"] == city:
-            print(f"[DEBUG] Пользователь {user_id} оплатил доступ к сети {network} для города {city}.")
+            print(f"[DEBUG] ✅ Конкретная сеть: {network} / {city}")
             return True
 
-    print(f"[DEBUG] Пользователь {user_id} не оплатил доступ к сети {network} для города {city}.")
+        # ✅ Специально для НС
+        ns_variants = ["НС", "Знакомства 66", "Знакомства 74"]
+        if (
+            network in ns_variants
+            and payment["network"] == "Все сети"
+            and payment["city"] == city
+        ):
+            print(f"[DEBUG] ✅ НС особый случай: {network} / {city} от Все сети")
+            return True
+
+    print(f"[DEBUG] ❌ Нет доступа у {user_id} к {network} / {city}")
     return False
 
 # Сохранение данных в файл
@@ -546,6 +564,7 @@ def save_data(retries=3, delay=0.5):
                             """, (
                                 user_id, post["network"], post["city"],
                                 post["time"], post["chat_id"], post["message_id"]
+				int(post.get("deleted", False))  # 👈 вот это
                             ))
 
                     conn.commit()
@@ -800,14 +819,36 @@ def select_network_for_payment(message, user_id):
         bot.send_message(message.chat.id, " Ошибка! Выберите правильную сеть.")
         bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
 
-# Функция для выбора города при добавления оплатившего
 def select_city_for_payment(message, user_id, network):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "️ Выберите сеть для добавления пользователя:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
         return
 
+    # ⬇️ Выбираем города по сети
+    if network == "Мужской Клуб":
+        cities = list(chat_ids_mk.keys())
+    elif network == "ПАРНИ 18+":
+        cities = list(chat_ids_parni.keys())
+    elif network == "НС":
+        cities = list(chat_ids_ns.keys())
+    elif network == "Все сети":
+        # 📌 Пересекаем все списки — показываем только общие города
+        cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
+    else:
+        cities = []
+
+    # Проверка: выбранный город допустим?
     city = message.text
+    if city not in cities:
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        markup.add(*cities)
+        markup.add("Назад")
+        bot.send_message(message.chat.id, "📍 Пожалуйста, выберите город из списка:", reply_markup=markup)
+        bot.register_next_step_handler(message, lambda m: select_city_for_payment(m, user_id, network))
+        return
+
+    # Продолжение — выбор срока
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
     markup.add("День", "Неделя", "Месяц")
     bot.send_message(message.chat.id, " Выберите срок оплаты:", reply_markup=markup)
@@ -1177,7 +1218,8 @@ def select_network(message, text, media_type, file_id):
         elif selected_network == "НС":
             cities = list(chat_ids_ns.keys())
         elif selected_network == "Все сети":
-            cities = list(set(list(chat_ids_mk.keys()) + list(chat_ids_parni.keys()) + list(chat_ids_ns.keys())))
+    # Только города, которые есть во всех сетях — пересечение
+    cities = list(set(chat_ids_mk.keys()) & set(chat_ids_parni.keys()) & set(chat_ids_ns.keys()))
         for city in cities:
             markup.add(city)
         markup.add("Выбрать другую сеть", "Назад")
@@ -1383,11 +1425,12 @@ def handle_delete_confirmation(call):
             except Exception as e:
                 print(f"[WARN] Не удалось удалить сообщение: {e}")
 
-        user_posts[user_id] = []
+            post["deleted"] = True  # ✅ Просто помечаем как удалённый
+
         save_data()
 
     bot.edit_message_text(
-        f"✅ Удалено *{deleted}* объявлений пользователя ID: `{user_id}`.",
+        f"✅ Удалено {deleted} объявлений пользователя ID: `{user_id}`.",
         call.message.chat.id,
         call.message.message_id,
         parse_mode="Markdown"
