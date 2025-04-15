@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import threading
 import shutil
+import re
 
 import pytz
 from pytz import timezone
@@ -21,10 +22,9 @@ from flask import Flask, request, Response
 
 # Собственная функция для экранирования спецсимволов Markdown
 def escape_md(text):
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    for ch in escape_chars:
-        text = text.replace(ch, f"\\{ch}")
-    return text
+    if not isinstance(text, str):
+        text = str(text)
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
 
 # Получаем токен из переменной окружения
 TOKEN = os.getenv('BOT_TOKEN')
@@ -769,7 +769,6 @@ def check_payment(user_id, network, city):
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
-
     if not paid_users and not user_posts:
         print("[⛔ SAVE] Сохранение прервано: paid_users и user_posts пустые.")
         bot.send_message(
@@ -786,29 +785,27 @@ def save_data(retries=3, delay=0.5):
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
-                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
                     cur.execute("DELETE FROM failed_attempts")
 
-                    # Оплатившие
                     for user_id, entries in paid_users.items():
                         for entry in entries:
                             end = entry.get("end_date", now_ekb())
                             if isinstance(end, str):
-                                try: end = datetime.fromisoformat(end)
-                                except: end = now_ekb()
+                                try:
+                                    end = datetime.fromisoformat(end)
+                                except:
+                                    end = now_ekb()
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], end.isoformat()))
 
-                    # Админы
                     for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # Посты
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
@@ -824,7 +821,21 @@ def save_data(retries=3, delay=0.5):
                                 int(post.get("deleted", False))
                             ))
 
-                    # ❌ Неудачные попытки
+                            # Также сохраняем в post_history
+                            cur.execute("""
+                                INSERT INTO post_history (user_id, network, city, time, chat_id, message_id, deleted, deleted_by_admin)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                user_id,
+                                post["network"],
+                                post["city"],
+                                post["time"],
+                                post["chat_id"],
+                                post["message_id"],
+                                int(post.get("deleted", False)),
+                                int(post.get("deleted_by_admin", False)) if "deleted_by_admin" in post else 0
+                            ))
+
                     for user_id, attempts in user_failed_attempts.items():
                         for attempt in attempts:
                             cur.execute("""
@@ -1141,7 +1152,6 @@ def show_failed_attempts(call):
         return
 
     try:
-        # Извлекаем данные из таблицы failed_attempts
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
                 cur = conn.cursor()
@@ -1157,7 +1167,6 @@ def show_failed_attempts(call):
             bot.answer_callback_query(call.id, "✅ Нет попыток без доступа.")
             return
 
-        # Форматируем данные для вывода
         response = "📛 *Попытки публикации без доступа:*\n\n"
         for user_id, network, city, time_str, reason in attempts:
             try:
@@ -1189,7 +1198,7 @@ def show_failed_attempts(call):
         bot.answer_callback_query(call.id)
 
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: {escape_md(str(e))}", parse_mode="Markdown")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
@@ -1198,7 +1207,7 @@ def show_post_history(call):
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT user_name, network, city, time, chat_id, message_id, deleted, deleted_by FROM post_history ORDER BY time DESC LIMIT 100")
+                cur.execute("SELECT user_id, network, city, time, chat_id, message_id, deleted, deleted_by_admin FROM post_history ORDER BY time DESC LIMIT 100")
                 posts = cur.fetchall()
 
         if not posts:
@@ -1208,30 +1217,30 @@ def show_post_history(call):
         report = "📜 *История публикаций:*\n\n"
         for post in posts:
             try:
-                user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+                user_id, network, city, time_str, chat_id, message_id, deleted, deleted_by_admin = post
                 time = datetime.fromisoformat(time_str)
                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
 
-                user_display = f"@{escape_md(user_name)}" if user_name else f"`{user_name}`"
+                user_display = f"ID: `{user_id}`"
                 network = escape_md(network)
                 city = escape_md(city)
-                deleted_by = escape_md(deleted_by) if deleted else ""
+                deleted_by_admin = escape_md(str(deleted_by_admin)) if deleted else ""
 
                 report += f"👤 *Юзер:* {user_display}\n"
                 report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
                 report += f"🕒 *Время:* {formatted_time}\n"
                 if deleted:
-                    report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
+                    report += f"❌ *Удалён:* Да (Кем: {deleted_by_admin})\n"
                 else:
                     report += f"✅ *Статус:* Активен\n"
                 report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
             except Exception as inner_e:
-                report += f"⚠️ Ошибка в записи: {inner_e}\n\n"
+                report += f"⚠️ Ошибка в записи: {escape_md(str(inner_e))}\n\n"
 
         bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
 
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {escape_md(str(e))}", parse_mode="Markdown")
 
 # Функция для добавления администратора
 def add_admin_step(message):
