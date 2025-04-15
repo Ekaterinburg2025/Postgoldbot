@@ -1186,7 +1186,8 @@ def show_failed_attempts(call):
                 user = bot.get_chat(user_id)
                 name = get_user_name(user)
                 escaped_name = escape_md(name)
-                user_link = f"[{escaped_name}](https://t.me/{user.username})" if user.username else escaped_name
+                escaped_username = escape_md(user.username) if user.username else None
+                user_link = f"[{escaped_name}](https://t.me/{escaped_username})" if escaped_username else f"*{escaped_name}*"
             except:
                 user_link = f"ID: `{user_id}`"
 
@@ -1203,15 +1204,19 @@ def show_failed_attempts(call):
             response += (
                 f"👤 {user_link}\n"
                 f"🌐 Сеть: *{network}*, Город: *{city}*\n"
-                f"🕐 {time_formatted}\n"
+                f"🕐 {escape_md(time_formatted)}\n"
                 f"❌ Причина: _{reason}_\n\n"
             )
 
-        bot.send_message(call.message.chat.id, response, parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, response, parse_mode="MarkdownV2")
         bot.answer_callback_query(call.id)
 
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: {escape_md(str(e))}", parse_mode="Markdown")
+        bot.send_message(
+            call.message.chat.id,
+            f"❌ Ошибка при получении попыток: {escape_md(str(e))}",
+            parse_mode="MarkdownV2"
+        )
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
