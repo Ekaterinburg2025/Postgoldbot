@@ -43,6 +43,7 @@ user_daily_posts = {}
 user_statistics = {}
 admins = []
 db_lock = threading.Lock()
+user_failed_attempts = {}
 
 # 🔒 Вечные (статичные) админы
 CORE_ADMINS = [479938867, 7235010425]
@@ -53,6 +54,7 @@ def init_db():
         with sqlite3.connect("bot_data.db") as conn:
             cur = conn.cursor()
 
+            # Таблица оплативших пользователей
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS paid_users (
                     user_id INTEGER,
@@ -62,12 +64,14 @@ def init_db():
                 )
             """)
 
+            # Таблица администраторов
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS admin_users (
                     user_id INTEGER PRIMARY KEY
                 )
             """)
 
+            # Таблица опубликованных постов
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_posts (
                     user_id INTEGER,
@@ -80,12 +84,90 @@ def init_db():
                 )
             """)
 
+            # Таблица неудачных попыток публикации
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS failed_attempts (
+                    user_id INTEGER,
+                    network TEXT,
+                    city TEXT,
+                    time TEXT,
+                    reason TEXT
+                )
+            """)
+
             # ⚠️ Если таблица уже существовала, добавим колонку deleted вручную (миграция)
             try:
                 cur.execute("ALTER TABLE user_posts ADD COLUMN deleted INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # колонка уже есть — пропускаем
 
+            # Таблица истории постов
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS post_history (
+                    user_id INTEGER,
+                    user_name TEXT,
+                    network TEXT,
+                    city TEXT,
+                    time TEXT,
+                    chat_id INTEGER,
+                    message_id INTEGER,
+                    deleted INTEGER DEFAULT 0,
+                    deleted_by INTEGER
+                )
+            """)
+
+            conn.commit()
+
+def log_failed_attempt(user_id, network, city, reason):
+    """Логирует неудачную попытку публикации."""
+    try:
+        with db_lock:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO failed_attempts (user_id, network, city, time, reason)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (user_id, network, city, now_ekb().isoformat(), reason))
+                conn.commit()
+        print(f"[FAILED] {user_id}, {repr(network)}, {repr(city)}, {repr(reason)}")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при логировании неудачной попытки: {e}")
+
+def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, deleted=False, deleted_by=None):
+    """
+    Сохраняет пост в таблицу post_history.
+    """
+    post_time = now_ekb()
+    post_data = {
+        "user_id": user_id,
+        "user_name": user_name,
+        "network": network,
+        "city": city,
+        "time": post_time,
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "deleted": deleted,
+        "deleted_by": deleted_by
+    }
+
+    # Сохраняем пост в post_history
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO post_history (user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                post_data["user_id"],
+                post_data["user_name"],
+                post_data["network"],
+                post_data["city"],
+                post_data["time"].isoformat(),
+                post_data["chat_id"],
+                post_data["message_id"],
+                int(post_data["deleted"]),
+                post_data["deleted_by"]
+            ))
             conn.commit()
 
 # Загрузка данных из базы данных
@@ -138,11 +220,31 @@ def load_data():
                         "deleted": bool(deleted)
                     })
 
-                # ⬇️ Восстанавливаем переменные
-                global paid_users, admins, user_posts, user_daily_posts
+                # Загружаем неудачные попытки
+                cur.execute("SELECT user_id, network, city, time, reason FROM failed_attempts")
+                local_failed_attempts = {}
+                for user_id, network, city, time_str, reason in cur.fetchall():
+                    if user_id not in local_failed_attempts:
+                        local_failed_attempts[user_id] = []
+
+                    try:
+                        time = datetime.fromisoformat(time_str)
+                    except:
+                        time = now_ekb()
+
+                    local_failed_attempts[user_id].append({
+                        "network": network,
+                        "city": city,
+                        "time": time,
+                        "reason": reason
+                    })
+
+                # ⬇️ Восстанавливаем глобальные переменные
+                global paid_users, admins, user_posts, user_daily_posts, user_failed_attempts
                 paid_users = local_paid_users
                 admins = local_admins
                 user_posts = local_user_posts
+                user_failed_attempts = local_failed_attempts
 
                 # 🔁 Восстановление user_daily_posts из user_posts
                 from collections import defaultdict
@@ -648,7 +750,6 @@ def check_payment(user_id, network, city):
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
 
-    # 🛡 Предохранитель от случайного обнуления базы
     if not paid_users and not user_posts:
         print("[⛔ SAVE] Сохранение прервано: paid_users и user_posts пустые.")
         bot.send_message(
@@ -669,26 +770,25 @@ def save_data(retries=3, delay=0.5):
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
+                    cur.execute("DELETE FROM failed_attempts")
 
-                    # ✅ Сохранение оплативших пользователей
+                    # Оплатившие
                     for user_id, entries in paid_users.items():
                         for entry in entries:
-                            end = entry.get("end_date")
+                            end = entry.get("end_date", now_ekb())
                             if isinstance(end, str):
-                                try:
-                                    end = datetime.fromisoformat(end)
-                                except:
-                                    end = now_ekb()
+                                try: end = datetime.fromisoformat(end)
+                                except: end = now_ekb()
                             cur.execute("""
                                 INSERT INTO paid_users (user_id, network, city, end_date)
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], end.isoformat()))
 
-                    # ✅ Сохранение админов
+                    # Админы
                     for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
-                    # ✅ Сохранение публикаций
+                    # Посты
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
@@ -702,6 +802,20 @@ def save_data(retries=3, delay=0.5):
                                 post["chat_id"],
                                 post["message_id"],
                                 int(post.get("deleted", False))
+                            ))
+
+                    # ❌ Неудачные попытки
+                    for user_id, attempts in user_failed_attempts.items():
+                        for attempt in attempts:
+                            cur.execute("""
+                                INSERT INTO failed_attempts (user_id, network, city, time, reason)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (
+                                user_id,
+                                attempt["network"],
+                                attempt["city"],
+                                attempt["time"].isoformat(),
+                                attempt["reason"]
                             ))
 
                     conn.commit()
@@ -904,6 +1018,8 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("⏳ Изменить срок оплаты", callback_data="admin_change_duration"))
     markup.add(types.InlineKeyboardButton("👑 Добавить администратора", callback_data="admin_add_admin"))
     markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
+    markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts"))
+    markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
     bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
@@ -996,6 +1112,90 @@ def select_city_for_payment(message, user_id, network):
     markup.add("День", "Неделя", "Месяц")
     bot.send_message(message.chat.id, "⏳ Выберите срок оплаты:", reply_markup=markup)
     bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_failed_attempts")
+def show_failed_attempts(call):
+    """Показывает последние неудачные попытки из базы данных."""
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "⛔ Нет доступа.")
+        return
+
+    try:
+        # Извлекаем данные из таблицы failed_attempts
+        with db_lock:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT user_id, network, city, time, reason
+                    FROM failed_attempts
+                    ORDER BY time DESC
+                    LIMIT 100
+                """)
+                attempts = cur.fetchall()
+
+        if not attempts:
+            bot.answer_callback_query(call.id, "✅ Нет попыток без доступа.")
+            return
+
+        # Форматируем данные для вывода
+        response = "📛 *Попытки публикации без доступа:*\n\n"
+        for user_id, network, city, time_str, reason in attempts:
+            try:
+                user = bot.get_chat(user_id)
+                name = get_user_name(user)
+                user_link = f"[{name}](https://t.me/{user.username})" if user.username else f"{name}"
+            except:
+                user_link = f"ID: `{user_id}`"
+
+            # Преобразуем строку времени в datetime
+            try:
+                time = datetime.fromisoformat(time_str)
+                time_formatted = time.strftime('%d.%m.%Y %H:%M')
+            except:
+                time_formatted = "неизвестно"
+
+            # Добавляем запись в ответ
+            response += (
+                f"👤 {user_link}\n"
+                f"🌐 Сеть: *{network}*, Город: *{city}*\n"
+                f"🕐 {time_formatted}\n"
+                f"❌ Причина: _{reason}_\n\n"
+            )
+
+        # Отправляем сообщение
+        bot.send_message(call.message.chat.id, response, parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
+
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: {e}")
+        bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
+def show_post_history(call):
+    with db_lock:
+        with sqlite3.connect("bot_data.db") as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT user_name, network, city, time, chat_id, message_id, deleted, deleted_by FROM post_history ORDER BY time DESC LIMIT 100")
+            posts = cur.fetchall()
+
+    if not posts:
+        bot.send_message(call.message.chat.id, "История постов пуста.")
+        return
+
+    report = "📜 *История публикаций:*\n\n"
+    for post in posts:
+        user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+        time = datetime.fromisoformat(time_str)
+        report += f"👤 *Юзер:* @{user_name}\n"
+        report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
+        report += f"🕒 *Время:* {time.strftime('%d.%m.%Y %H:%M')}\n"
+        if deleted:
+            report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
+        else:
+            report += f"✅ *Статус:* Активен\n"
+        report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
+
+    bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
 
 # Функция для добавления администратора
 def add_admin_step(message):
@@ -1254,10 +1454,25 @@ def process_delete_choice(message):
             for post in user_posts[message.chat.id]:
                 time_formatted = format_time(post["time"])
                 if message.text == f"Удалить: {time_formatted}, {post['city']}, {post['network']}":
+                    # Удаляем пост
                     try:
                         bot.delete_message(post["chat_id"], post["message_id"])
                     except Exception:
                         pass
+
+                    # Сохраняем пост в историю
+                    add_post_to_history(
+                        user_id=message.chat.id,
+                        user_name=get_user_name(message.from_user),
+                        network=post["network"],
+                        city=post["city"],
+                        chat_id=post["chat_id"],
+                        message_id=post["message_id"],
+                        deleted=True,
+                        deleted_by="Пользователь"  # Или ID администратора, если удаляет админ
+                    )
+
+                    # Удаляем пост из списка
                     user_posts[message.chat.id].remove(post)
                     bot.send_message(message.chat.id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
                     return
@@ -1268,10 +1483,25 @@ def process_delete_choice(message):
 def process_delete_all_choice(message):
     if message.text == "Да, удалить всё":
         for post in user_posts[message.chat.id]:
+            # Удаляем пост
             try:
                 bot.delete_message(post["chat_id"], post["message_id"])
             except Exception:
                 pass
+
+            # Сохраняем пост в историю
+            add_post_to_history(
+                user_id=message.chat.id,
+                user_name=get_user_name(message.from_user),
+                network=post["network"],
+                city=post["city"],
+                chat_id=post["chat_id"],
+                message_id=post["message_id"],
+                deleted=True,
+                deleted_by="Пользователь"  # Или ID администратора, если удаляет админ
+            )
+
+        # Очищаем список постов
         user_posts[message.chat.id] = []
         bot.send_message(message.chat.id, "✅ Все ваши объявления успешно удалены.", reply_markup=get_main_keyboard())
     else:
@@ -1368,6 +1598,9 @@ def select_network(message, text, media_type, file_id):
         bot.register_next_step_handler(message, process_text)
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
+    """
+    Публикует пост в выбранной сети и городе, сохраняет его в user_posts и post_history.
+    """
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
@@ -1381,7 +1614,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+    networks = ["Мужской Клуб", "Парни 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
 
@@ -1392,15 +1625,21 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         if not city_data:
             continue
 
+        # 🔒 Проверка оплаты
         if not is_user_paid(user_id, network, city):
+            # ⛔ Логируем неудачу
+            log_failed_attempt(user_id, network, city, "Нет доступа")
             continue
 
+        # ⛔ Проверка лимита
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
             bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для {network}, город {city}")
+            log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
+        # ✅ Публикация
         signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
@@ -1414,6 +1653,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
 
+                # Сохраняем пост в user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
@@ -1424,6 +1664,17 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "network": network
                 })
 
+                # Сохраняем пост в post_history
+                add_post_to_history(
+                    user_id=user_id,
+                    user_name=user_name,
+                    network=network,
+                    city=location["name"],
+                    chat_id=chat_id,
+                    message_id=sent_message.message_id
+                )
+
+                # Обновляем лимиты
                 if user_id not in user_daily_posts:
                     user_daily_posts[user_id] = {}
                 if network not in user_daily_posts[user_id]:
@@ -1437,6 +1688,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 was_published = True
 
             except telebot.apihelper.ApiTelegramException as e:
+                log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e.description}")
                 bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
 
     if not was_published:
