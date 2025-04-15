@@ -119,7 +119,20 @@ def init_db():
             conn.commit()
 
 def log_failed_attempt(user_id, network, city, reason):
-    """Логирует неудачную попытку публикации."""
+    """Логирует неудачную попытку публикации — и в память, и в базу."""
+
+    # 💾 Сохраняем в память
+    if user_id not in user_failed_attempts:
+        user_failed_attempts[user_id] = []
+
+    user_failed_attempts[user_id].append({
+        "network": network,
+        "city": city,
+        "time": now_ekb(),
+        "reason": reason
+    })
+
+    # 🧱 И дублируем в БД для надёжности
     try:
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
@@ -1643,9 +1656,6 @@ def select_network(message, text, media_type, file_id):
         bot.register_next_step_handler(message, process_text)
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
-    """
-    Публикует пост в выбранной сети и городе, сохраняет его в user_posts и post_history.
-    """
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
         bot.register_next_step_handler(message, select_network, text, media_type, file_id)
@@ -1672,7 +1682,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         # 🔒 Проверка оплаты
         if not is_user_paid(user_id, network, city):
-            # ⛔ Логируем неудачу
             log_failed_attempt(user_id, network, city, "Нет доступа")
             continue
 
@@ -1743,6 +1752,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         else:
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
+
+    # 💾 Сохраняем всё, даже если не было публикации (лог-файлы важны!)
+    save_data()
 
     ask_for_new_post(message)
 
