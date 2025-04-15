@@ -647,6 +647,16 @@ def check_payment(user_id, network, city):
 # Сохранение данных в файл
 def save_data(retries=3, delay=0.5):
     """Сохраняет данные в базу данных с повторной попыткой при блокировке."""
+
+    # 🛡 Предохранитель от случайного обнуления базы
+    if not paid_users and not user_posts:
+        print("[⛔ SAVE] Сохранение прервано: paid_users и user_posts пустые.")
+        bot.send_message(
+            ADMIN_CHAT_ID,
+            "⚠️ Сохранение базы прервано: нет данных (0 оплат, 0 постов).",
+        )
+        return
+
     print(f"[💾 SAVE] Оплативших: {len(paid_users)}, Постов: {len(user_posts)}, Админов: {len(admins)}")
 
     for attempt in range(retries):
@@ -691,13 +701,12 @@ def save_data(retries=3, delay=0.5):
                                 post["time"],
                                 post["chat_id"],
                                 post["message_id"],
-                                int(post.get("deleted", False))  # ✅ Сохраняем как 0 или 1
+                                int(post.get("deleted", False))
                             ))
 
                     conn.commit()
                     print("[✅ SAVE] Успешно сохранено в bot_data.db")
 
-                    # 💬 Отправка уведомления админу
                     bot.send_message(
                         ADMIN_CHAT_ID,
                         f"✅ *Сохранено в базу:*\n👤 Оплативших: *{len(paid_users)}*\n📬 Постов: *{len(user_posts)}*\n👮 Админов: *{len(admins)}*",
@@ -800,9 +809,17 @@ def update_daily_posts(user_id, network, city, remove=False):
 
 def send_nightly_backup():
     try:
+        # ⛔ Не отправляем, если в памяти ничего нет
+        if len(paid_users) == 0 and len(user_posts) == 0:
+            bot.send_message(ADMIN_CHAT_ID, "⚠️ Ночной бэкап отменён: в памяти нет данных (0 оплат, 0 постов).")
+            print("[⛔ BACKUP] База пуста, пропускаем отправку.")
+            return
+
+        save_data()  # 💾 Обязательно сохраняем перед отправкой
+
         with open("bot_data.db", "rb") as f:
             bot.send_document(ADMIN_CHAT_ID, f, caption="🌙 Ночной бэкап базы данных")
-            print("[✅ BACKUP] Ночной бэкап отправлен")
+            print("[✅ BACKUP] Ночной бэкап успешно отправлен")
     except Exception as e:
         print(f"[❌ BACKUP] Ошибка при отправке бэкапа: {e}")
 
@@ -1563,13 +1580,20 @@ if __name__ == '__main__':
     init_db()
     paid_users, admins, user_posts = load_data()
 
-    # 🔁 Добавляем вечных админов, если их нет
+    print(f"[📂 LOAD] Загружено: {len(paid_users)} оплат, {len(user_posts)} постов, {len(admins)} админов")
+
+    # 🔁 Добавляем вечных админов
     for core_admin in CORE_ADMINS:
         if core_admin not in admins:
             admins.append(core_admin)
 
-    save_data()  # 💾 Сохраняем всё — теперь точно!
+    # 💾 Сохраняем, только если есть что
+    if paid_users or user_posts:
+        save_data()
+    else:
+        print("[⚠️ INIT] Пропускаем save_data(): нет данных для сохранения.")
 
     schedule_auto_backup()
+
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
