@@ -183,12 +183,10 @@ def load_data():
                 for user_id, network, city, end_date in cur.fetchall():
                     if user_id not in local_paid_users:
                         local_paid_users[user_id] = []
-
                     try:
                         parsed_date = datetime.fromisoformat(end_date)
                     except:
                         parsed_date = None
-
                     local_paid_users[user_id].append({
                         "network": network,
                         "city": city,
@@ -199,18 +197,16 @@ def load_data():
                 cur.execute("SELECT user_id FROM admin_users")
                 local_admins = [row[0] for row in cur.fetchall()]
 
-                # Загружаем публикации с флагом deleted
+                # Загружаем посты
                 cur.execute("SELECT user_id, network, city, time, chat_id, message_id, deleted FROM user_posts")
                 local_user_posts = {}
                 for user_id, network, city, time_str, chat_id, message_id, deleted in cur.fetchall():
                     if user_id not in local_user_posts:
                         local_user_posts[user_id] = []
-
                     try:
                         post_time = datetime.fromisoformat(time_str)
                     except:
                         post_time = now_ekb()
-
                     local_user_posts[user_id].append({
                         "message_id": message_id,
                         "chat_id": chat_id,
@@ -224,33 +220,57 @@ def load_data():
                 cur.execute("SELECT user_id, network, city, time, reason FROM failed_attempts")
                 local_failed_attempts = {}
                 for user_id, network, city, time_str, reason in cur.fetchall():
+                    try:
+                        attempt_time = datetime.fromisoformat(time_str)
+                    except:
+                        attempt_time = now_ekb()
                     if user_id not in local_failed_attempts:
                         local_failed_attempts[user_id] = []
-
-                    try:
-                        time = datetime.fromisoformat(time_str)
-                    except:
-                        time = now_ekb()
-
                     local_failed_attempts[user_id].append({
                         "network": network,
                         "city": city,
-                        "time": time,
+                        "time": attempt_time,
                         "reason": reason
                     })
 
-                # ⬇️ Восстанавливаем глобальные переменные
-                global paid_users, admins, user_posts, user_daily_posts, user_failed_attempts
+                # Обновляем глобальные переменные
+                global paid_users, admins, user_posts, user_failed_attempts, user_daily_posts
                 paid_users = local_paid_users
                 admins = local_admins
                 user_posts = local_user_posts
                 user_failed_attempts = local_failed_attempts
 
-                # 🔁 Восстановление user_daily_posts из user_posts
+                # Восстановление user_daily_posts
                 from collections import defaultdict
                 user_daily_posts = {}
 
-                for user_id, posts in user_posts.items():
+                source_posts = user_posts if user_posts else {}
+
+                # Если user_posts пуст — пробуем взять посты из post_history
+                if not source_posts:
+                    print("[ℹ️] Восстанавливаем user_daily_posts из post_history")
+                    cur.execute("SELECT user_id, network, city, time, deleted FROM post_history")
+                    for user_id, network, city, time_str, deleted in cur.fetchall():
+                        try:
+                            post_time = datetime.fromisoformat(time_str)
+                        except:
+                            continue
+
+                        if post_time.date() != now_ekb().date():
+                            continue
+
+                        if user_id not in source_posts:
+                            source_posts[user_id] = []
+
+                        source_posts[user_id].append({
+                            "network": network,
+                            "city": city,
+                            "time": post_time,
+                            "deleted": bool(deleted)
+                        })
+
+                # Сборка user_daily_posts
+                for user_id, posts in source_posts.items():
                     for post in posts:
                         network = post["network"]
                         city = post["city"]
@@ -264,7 +284,7 @@ def load_data():
                                 continue
 
                         if time.date() != now_ekb().date():
-                            continue  # только сегодняшние посты
+                            continue
 
                         if user_id not in user_daily_posts:
                             user_daily_posts[user_id] = defaultdict(lambda: defaultdict(lambda: {
@@ -1143,18 +1163,21 @@ def show_failed_attempts(call):
             try:
                 user = bot.get_chat(user_id)
                 name = get_user_name(user)
-                user_link = f"[{name}](https://t.me/{user.username})" if user.username else f"{name}"
+                escaped_name = escape_md(name)
+                user_link = f"[{escaped_name}](https://t.me/{user.username})" if user.username else escaped_name
             except:
                 user_link = f"ID: `{user_id}`"
 
-            # Преобразуем строку времени в datetime
             try:
                 time = datetime.fromisoformat(time_str)
                 time_formatted = time.strftime('%d.%m.%Y %H:%M')
             except:
                 time_formatted = "неизвестно"
 
-            # Добавляем запись в ответ
+            network = escape_md(network)
+            city = escape_md(city)
+            reason = escape_md(reason)
+
             response += (
                 f"👤 {user_link}\n"
                 f"🌐 Сеть: *{network}*, Город: *{city}*\n"
@@ -1162,7 +1185,6 @@ def show_failed_attempts(call):
                 f"❌ Причина: _{reason}_\n\n"
             )
 
-        # Отправляем сообщение
         bot.send_message(call.message.chat.id, response, parse_mode="Markdown")
         bot.answer_callback_query(call.id)
 
@@ -1172,30 +1194,44 @@ def show_failed_attempts(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
 def show_post_history(call):
-    with db_lock:
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT user_name, network, city, time, chat_id, message_id, deleted, deleted_by FROM post_history ORDER BY time DESC LIMIT 100")
-            posts = cur.fetchall()
+    try:
+        with db_lock:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT user_name, network, city, time, chat_id, message_id, deleted, deleted_by FROM post_history ORDER BY time DESC LIMIT 100")
+                posts = cur.fetchall()
 
-    if not posts:
-        bot.send_message(call.message.chat.id, "История постов пуста.")
-        return
+        if not posts:
+            bot.send_message(call.message.chat.id, "История постов пуста.")
+            return
 
-    report = "📜 *История публикаций:*\n\n"
-    for post in posts:
-        user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
-        time = datetime.fromisoformat(time_str)
-        report += f"👤 *Юзер:* @{user_name}\n"
-        report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
-        report += f"🕒 *Время:* {time.strftime('%d.%m.%Y %H:%M')}\n"
-        if deleted:
-            report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
-        else:
-            report += f"✅ *Статус:* Активен\n"
-        report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
+        report = "📜 *История публикаций:*\n\n"
+        for post in posts:
+            try:
+                user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+                time = datetime.fromisoformat(time_str)
+                formatted_time = time.strftime('%d.%m.%Y %H:%M')
 
-    bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
+                user_display = f"@{escape_md(user_name)}" if user_name else f"`{user_name}`"
+                network = escape_md(network)
+                city = escape_md(city)
+                deleted_by = escape_md(deleted_by) if deleted else ""
+
+                report += f"👤 *Юзер:* {user_display}\n"
+                report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
+                report += f"🕒 *Время:* {formatted_time}\n"
+                if deleted:
+                    report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
+                else:
+                    report += f"✅ *Статус:* Активен\n"
+                report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
+            except Exception as inner_e:
+                report += f"⚠️ Ошибка в записи: {inner_e}\n\n"
+
+        bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
+
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {e}")
 
 # Функция для добавления администратора
 def add_admin_step(message):
