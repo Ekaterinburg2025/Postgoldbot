@@ -798,11 +798,14 @@ def save_data(retries=3, delay=0.5):
                 with sqlite3.connect("bot_data.db", timeout=5) as conn:
                     cur = conn.cursor()
 
+                    # Очистка таблиц
                     cur.execute("DELETE FROM paid_users")
                     cur.execute("DELETE FROM admin_users")
                     cur.execute("DELETE FROM user_posts")
                     cur.execute("DELETE FROM failed_attempts")
+                    cur.execute("DELETE FROM post_history")
 
+                    # Сохраняем оплативших
                     for user_id, entries in paid_users.items():
                         for entry in entries:
                             end = entry.get("end_date", now_ekb())
@@ -816,9 +819,11 @@ def save_data(retries=3, delay=0.5):
                                 VALUES (?, ?, ?, ?)
                             """, (user_id, entry["network"], entry["city"], end.isoformat()))
 
+                    # Сохраняем админов
                     for user_id in admins:
                         cur.execute("INSERT OR IGNORE INTO admin_users (user_id) VALUES (?)", (user_id,))
 
+                    # Сохраняем посты
                     for user_id, posts in user_posts.items():
                         for post in posts:
                             cur.execute("""
@@ -836,19 +841,21 @@ def save_data(retries=3, delay=0.5):
 
                             # Также сохраняем в post_history
                             cur.execute("""
-                                INSERT INTO post_history (user_id, network, city, time, chat_id, message_id, deleted, deleted_by_admin)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                INSERT INTO post_history (user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 user_id,
+                                post.get("user_name", "неизвестен"),
                                 post["network"],
                                 post["city"],
                                 post["time"],
                                 post["chat_id"],
                                 post["message_id"],
                                 int(post.get("deleted", False)),
-                                int(post.get("deleted_by_admin", False)) if "deleted_by_admin" in post else 0
+                                post.get("deleted_by", None)
                             ))
 
+                    # Неудачные попытки
                     for user_id, attempts in user_failed_attempts.items():
                         for attempt in attempts:
                             cur.execute("""
