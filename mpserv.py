@@ -1225,7 +1225,12 @@ def show_post_history(call):
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT user_id, network, city, time, chat_id, message_id, deleted, deleted_by_admin FROM post_history ORDER BY time DESC LIMIT 100")
+                cur.execute("""
+                    SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
+                    FROM post_history
+                    ORDER BY time DESC
+                    LIMIT 100
+                """)
                 posts = cur.fetchall()
 
         if not posts:
@@ -1235,23 +1240,24 @@ def show_post_history(call):
         report = "📜 *История публикаций:*\n\n"
         for post in posts:
             try:
-                user_id, network, city, time_str, chat_id, message_id, deleted, deleted_by_admin = post
+                user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
                 time = datetime.fromisoformat(time_str)
                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
 
-                user_display = f"ID: `{user_id}`"
+                user_display = f"{escape_md(user_name)} (ID: `{user_id}`)" if user_name else f"ID: `{user_id}`"
                 network = escape_md(network)
                 city = escape_md(city)
-                deleted_by_admin = escape_md(str(deleted_by_admin)) if deleted else ""
+                deleted_by = escape_md(str(deleted_by)) if deleted else ""
 
                 report += f"👤 *Юзер:* {user_display}\n"
                 report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
                 report += f"🕒 *Время:* {formatted_time}\n"
                 if deleted:
-                    report += f"❌ *Удалён:* Да (Кем: {deleted_by_admin})\n"
+                    report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
                 else:
                     report += f"✅ *Статус:* Активен\n"
                 report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
+
             except Exception as inner_e:
                 report += f"⚠️ Ошибка в записи: {escape_md(str(inner_e))}\n\n"
 
