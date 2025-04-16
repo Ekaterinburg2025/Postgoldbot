@@ -1229,6 +1229,8 @@ def show_failed_attempts(call):
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
 def show_post_history(call):
     try:
+        print("[DEBUG] Нажата кнопка истории постов")
+
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
                 cur = conn.cursor()
@@ -1239,6 +1241,8 @@ def show_post_history(call):
                     LIMIT 100
                 """)
                 posts = cur.fetchall()
+
+        print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
 
         if not posts:
             bot.send_message(call.message.chat.id, "История постов пуста.")
@@ -1256,6 +1260,9 @@ def show_post_history(call):
                 city = escape_md(city)
                 deleted_by = escape_md(str(deleted_by)) if deleted else ""
 
+                # ⚠️ Важно: правильный chat_id без -100
+                chat_id_short = str(chat_id).replace("-100", "")
+
                 report += f"👤 *Юзер:* {user_display}\n"
                 report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
                 report += f"🕒 *Время:* {formatted_time}\n"
@@ -1263,14 +1270,16 @@ def show_post_history(call):
                     report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
                 else:
                     report += f"✅ *Статус:* Активен\n"
-                report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id}/{message_id})\n\n"
+                report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id_short}/{message_id})\n\n"
 
             except Exception as inner_e:
+                print(f"[ERROR] Ошибка в записи истории: {inner_e}")
                 report += f"⚠️ Ошибка в записи: {escape_md(str(inner_e))}\n\n"
 
         bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
 
     except Exception as e:
+        print(f"[ERROR] История постов: {e}")
         bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {escape_md(str(e))}", parse_mode="Markdown")
 
 # Функция для добавления администратора
