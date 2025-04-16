@@ -1725,7 +1725,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
 
-                # Сохраняем пост в user_posts
+                # ✅ Сохраняем в user_posts (добавили user_name!)
                 if user_id not in user_posts:
                     user_posts[user_id] = []
                 user_posts[user_id].append({
@@ -1733,10 +1733,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "chat_id": chat_id,
                     "time": now_ekb(),
                     "city": location["name"],
-                    "network": network
+                    "network": network,
+                    "user_name": user_name  # 🆕 обязательно!
                 })
 
-                # Сохраняем пост в post_history
+                # ✅ Добавляем в post_history
                 add_post_to_history(
                     user_id=user_id,
                     user_name=user_name,
@@ -1745,8 +1746,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     chat_id=chat_id,
                     message_id=sent_message.message_id
                 )
+                print(f"[DEBUG] Пост сохранён в историю: {user_name} / {network} / {location['name']}")
 
-                # Обновляем лимиты
+                # ✅ Обновляем лимиты
                 if user_id not in user_daily_posts:
                     user_daily_posts[user_id] = {}
                 if network not in user_daily_posts[user_id]:
@@ -1771,7 +1773,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
         bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
 
-    # 💾 Сохраняем всё, даже если не было публикации (лог-файлы важны!)
+    # 💾 Сохраняем даже при отсутствии публикации (важны попытки!)
     save_data()
 
     ask_for_new_post(message)
