@@ -23,8 +23,6 @@ def now_ekb():
 # Убедись, что используешь одну временную зону для всех дат
 ekb_tz = pytz.timezone('Asia/Yekaterinburg')
 
-# Приведение времени к aware-дате
-time = time.astimezone(ekb_tz)  # Преобразуем время в aware-дату с учётом временной зоны
 today = now_ekb().astimezone(ekb_tz).date()
 
 import telebot
