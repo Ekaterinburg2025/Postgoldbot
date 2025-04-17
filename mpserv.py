@@ -21,6 +21,8 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
+import re
+
 def escape_md(text):
     """
     Экранирует спецсимволы MarkdownV2, но оставляет пробелы, точки, запятые и эмодзи без изменений.
@@ -33,8 +35,8 @@ def escape_md(text):
     if not text.strip():
         return ""
     
-    # Экранируем только спецсимволы MarkdownV2
-    text = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    # Экранируем только спецсимволы MarkdownV2 (точка и запятая не экранируются)
+    text = re.sub(r'([_*\[\]()~`>#+\-=|{}\!\\])', r'\\\1', text)
     
     return text
 
@@ -1205,9 +1207,8 @@ def show_failed_attempts(call):
                 name = get_user_name(user)
                 escaped_name = escape_md(name)
                 if user.username and re.match(r"^[A-Za-z0-9_]{5,}$", user.username):
-                    # Кодируем username для URL и формируем ссылку
-                    username_encoded = quote(user.username)
-                    user_link = f"[{escaped_name}](https://t.me/{username_encoded})"
+                    # Формируем ссылку без экранирования внутри URL
+                    user_link = f"[{escaped_name}](https://t.me/{user.username})"
                 else:
                     user_link = f"*{escaped_name}*"
             except:
@@ -1219,11 +1220,10 @@ def show_failed_attempts(call):
             except:
                 time_formatted = "неизвестно"
 
-            # Экранируем все строки
+            # Экранируем только текст, не ссылки и даты
             network = escape_md(network)
             city = escape_md(city)
             reason = escape_md(reason)
-            time_formatted = escape_md(time_formatted)
 
             response += (
                 f"👤 {user_link}\n"
