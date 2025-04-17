@@ -10,6 +10,11 @@ import re
 import html
 from urllib.parse import quote
 
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+ATTEMPTS_PER_PAGE = 10
+POSTS_PER_PAGE = 10
+
 import pytz
 from pytz import timezone
 
@@ -1080,8 +1085,8 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("⏳ Изменить срок оплаты", callback_data="admin_change_duration"))
     markup.add(types.InlineKeyboardButton("👑 Добавить администратора", callback_data="admin_add_admin"))
     markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
-    markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts"))
-    markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history"))
+    markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts:0))
+    markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history:0"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
     bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
@@ -1177,11 +1182,18 @@ def select_city_for_payment(message, user_id, network):
     bot.send_message(message.chat.id, "⏳ Выберите срок оплаты:", reply_markup=markup)
     bot.register_next_step_handler(message, lambda m: select_duration_for_payment(m, user_id, network, city))
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_failed_attempts")
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_failed_attempts"))
 def show_failed_attempts(call):
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "⛔ Нет доступа.")
         return
+
+    # Разбираем номер страницы из callback_data
+    try:
+        parts = call.data.split(":")
+        page = int(parts[1]) if len(parts) > 1 else 0
+    except:
+        page = 0
 
     try:
         with db_lock:
@@ -1191,7 +1203,6 @@ def show_failed_attempts(call):
                     SELECT user_id, network, city, time, reason
                     FROM failed_attempts
                     ORDER BY time DESC
-                    LIMIT 100
                 """)
                 attempts = cur.fetchall()
 
@@ -1199,8 +1210,13 @@ def show_failed_attempts(call):
             bot.answer_callback_query(call.id, "✅ Нет попыток без доступа.")
             return
 
-        response = "<b>📛 Попытки публикации без доступа:</b>\n\n"
-        for user_id, network, city, time_str, reason in attempts:
+        start = page * ATTEMPTS_PER_PAGE
+        end = start + ATTEMPTS_PER_PAGE
+        total_pages = (len(attempts) - 1) // ATTEMPTS_PER_PAGE + 1
+        page_attempts = attempts[start:end]
+
+        response = f"<b>📛 Попытки публикации без доступа (стр. {page+1} из {total_pages}):</b>\n\n"
+        for user_id, network, city, time_str, reason in page_attempts:
             try:
                 user = bot.get_chat(user_id)
                 name = escape_html(user.first_name)
@@ -1221,7 +1237,18 @@ def show_failed_attempts(call):
                 f"❌ Причина: <i>{escape_html(reason)}</i>\n\n"
             )
 
-        bot.send_message(call.message.chat.id, response, parse_mode="HTML")
+        # Кнопки «Назад» и «Вперёд»
+        keyboard = InlineKeyboardMarkup()
+        buttons = []
+        if page > 0:
+            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"show_failed_attempts:{page - 1}"))
+        if end < len(attempts):
+            buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"show_failed_attempts:{page + 1}"))
+        if buttons:
+            keyboard.row(*buttons)
+
+        bot.edit_message_text(response, chat_id=call.message.chat.id, message_id=call.message.message_id,
+                              parse_mode="HTML", reply_markup=keyboard)
         bot.answer_callback_query(call.id)
 
     except Exception as e:
@@ -1229,10 +1256,12 @@ def show_failed_attempts(call):
         bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
-@bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_post_history"))
 def show_post_history(call):
     try:
-        print("[DEBUG] Нажата кнопка истории постов")
+        # 🔢 Получаем номер страницы
+        parts = call.data.split(":")
+        page = int(parts[1]) if len(parts) > 1 else 0
 
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
@@ -1241,18 +1270,19 @@ def show_post_history(call):
                     SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
                     FROM post_history
                     ORDER BY time DESC
-                    LIMIT 100
                 """)
                 posts = cur.fetchall()
 
-        print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
+        total_pages = (len(posts) - 1) // POSTS_PER_PAGE + 1
+        page_posts = posts[page * POSTS_PER_PAGE: (page + 1) * POSTS_PER_PAGE]
 
-        if not posts:
+        if not page_posts:
             bot.send_message(call.message.chat.id, "История постов пуста.")
             return
 
-        report = "<b>📜 История публикаций:</b>\n\n"
-        for post in posts:
+        report = f"<b>📜 История публикаций (стр. {page + 1} из {total_pages}):</b>\n\n"
+
+        for post in page_posts:
             try:
                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
                 time = datetime.fromisoformat(time_str)
@@ -1267,7 +1297,7 @@ def show_post_history(call):
                         user_name = "неизвестен"
 
                 # Создаем кликабельное имя пользователя
-                user_display = f"<a href='tg://user?id={user_id}'>{escape_html(user_name)}</a> (ID: <code>{user_id}</code>)"
+                user_link = f"<a href='tg://user?id={user_id}'>{escape_html(user_name)}</a> (ID: <code>{user_id}</code>)"
                 network = escape_html(network)
                 city = escape_html(city)
                 chat_id_short = str(chat_id).replace("-100", "")
@@ -1279,21 +1309,36 @@ def show_post_history(call):
                 else:
                     status_line = "✅ <b>Статус:</b> Активен"
 
-                report += f"👤 <b>Юзер:</b> {user_display}\n"
-                report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
-                report += f"🕒 <b>Время:</b> {formatted_time}\n"
-                report += f"{status_line}\n"
-                report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
+                report += (
+                    f"👤 <b>Юзер:</b> {user_link}\n"
+                    f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                    f"🕒 <b>Время:</b> {formatted_time}\n"
+                    f"{status_line}\n"
+                    f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
+                )
 
             except Exception as inner_e:
                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
                 report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
 
-        bot.send_message(call.message.chat.id, report, parse_mode="HTML")
+        # Кнопки «назад/вперёд»
+        keyboard = InlineKeyboardMarkup()
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_post_history:{page - 1}"))
+        if (page + 1) * POSTS_PER_PAGE < len(posts):
+            nav_buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"admin_post_history:{page + 1}"))
+        if nav_buttons:
+            keyboard.row(*nav_buttons)
+
+        bot.edit_message_text(report, chat_id=call.message.chat.id, message_id=call.message.message_id,
+                              parse_mode="HTML", reply_markup=keyboard)
+        bot.answer_callback_query(call.id)
 
     except Exception as e:
         print(f"[ERROR] История постов: {e}")
         bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
+        bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 # Функция для добавления администратора
 def add_admin_step(message):
@@ -1440,12 +1485,15 @@ def show_statistics_for_admin(chat_id):
                                     print(f"DEBUG: Ошибка преобразования end_date: {end_date}")
                                     end_date = None
                             if isinstance(end_date, datetime):
-                                if end_date >= datetime.now():
-                                    expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
-                                    print(f"DEBUG: Найден срок для {network}, {city}: {expire_str}")
-                                else:
-                                    print(f"DEBUG: Срок истёк для {network}, {city}")
-                                    expire_str = "(срок истёк)"
+                                try:
+                                    if end_date >= now_ekb():  # <-- Исправлено здесь
+                                        expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
+                                        print(f"DEBUG: Найден срок для {network}, {city}: {expire_str}")
+                                    else:
+                                        print(f"DEBUG: Срок истёк для {network}, {city}")
+                                        expire_str = "(срок истёк)"
+                                except TypeError as te:
+                                    print(f"DEBUG: Ошибка сравнения дат: {te}")
                             break
                     else:
                         print(f"DEBUG: Запись оплаты для {network}, {city} не найдена для user_id={user_id}")
@@ -1734,12 +1782,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    username_link = message.from_user.username
     display_name = escape_html(get_user_name(message.from_user))
     text = escape_html(text)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
-    # Создание user_name
+    # Создаем жирное и кликабельное имя пользователя, используя tg://user?id={user_id}
     user_name = f'<b><a href="tg://user?id={user_id}">{display_name}</a></b>'
 
     was_published = False
