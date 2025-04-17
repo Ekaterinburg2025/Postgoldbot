@@ -24,7 +24,8 @@ from flask import Flask, request, Response
 def escape_md(text):
     if not isinstance(text, str):
         text = str(text)
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    text = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    return text
 
 # Получаем токен из переменной окружения
 TOKEN = os.getenv('BOT_TOKEN')
@@ -698,17 +699,19 @@ def get_admin_statistics():
             "links": []
         }
         limit_total = 0
-        links = set()  # чтобы избежать дубликатов
+        links = set()
+        today = now_ekb().date()
 
         for network, cities in networks.items():
             stats["details"][network] = {}
 
             for city, post_data in cities.items():
-                active_posts = len(post_data.get("posts", []))
-                deleted_posts = len(post_data.get("deleted_posts", []))
-                total_posts = active_posts + deleted_posts
+                # Оставляем только сегодняшние посты
+                today_posts = [p for p in post_data.get("posts", []) if isinstance(p, datetime) and p.date() == today]
+                today_deleted = [p for p in post_data.get("deleted_posts", []) if isinstance(p, datetime) and p.date() == today]
 
-                limit_total += 3  # по 3 публикации на каждую пару сеть+город
+                total_posts = len(today_posts) + len(today_deleted)
+                limit_total += 3
 
                 stats["details"][network][city] = {
                     "published": total_posts,
@@ -717,18 +720,16 @@ def get_admin_statistics():
 
                 stats["published"] += total_posts
 
-                # Ищем ссылки на сегодняшние посты
-                for post_time in post_data.get("posts", []):
-                    if isinstance(post_time, datetime) and post_time.date() == now_ekb().date():
-                        for user_post in user_posts.get(user_id, []):
-                            if (
-                                user_post["network"] == network and
-                                user_post["city"] == city and
-                                isinstance(user_post.get("time"), datetime) and
-                                user_post["time"].date() == now_ekb().date()
-                            ):
-                                link = f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
-                                links.add(link)
+                # Ссылки только на сегодняшние посты
+                for user_post in user_posts.get(user_id, []):
+                    if (
+                        user_post["network"] == network and
+                        user_post["city"] == city and
+                        isinstance(user_post.get("time"), datetime) and
+                        user_post["time"].date() == today
+                    ):
+                        link = f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
+                        links.add(link)
 
         stats["remaining"] = max(0, limit_total - stats["published"])
         stats["links"] = list(links)
@@ -1166,7 +1167,6 @@ def select_city_for_payment(message, user_id, network):
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_failed_attempts")
 def show_failed_attempts(call):
-    """Показывает последние неудачные попытки из базы данных."""
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "⛔ Нет доступа.")
         return
@@ -1193,8 +1193,10 @@ def show_failed_attempts(call):
                 user = bot.get_chat(user_id)
                 name = get_user_name(user)
                 escaped_name = escape_md(name)
-                escaped_username = escape_md(user.username) if user.username else None
-                user_link = f"[{escaped_name}](https://t.me/{escaped_username})" if escaped_username else f"*{escaped_name}*"
+                if user.username and re.match(r"^[A-Za-z0-9_]{5,}$", user.username):
+                    user_link = f"[{escaped_name}](https://t.me/{user.username})"
+                else:
+                    user_link = f"*{escaped_name}*"
             except:
                 user_link = f"ID: `{user_id}`"
 
@@ -1207,11 +1209,12 @@ def show_failed_attempts(call):
             network = escape_md(network)
             city = escape_md(city)
             reason = escape_md(reason)
+            time_formatted = escape_md(time_formatted)
 
             response += (
                 f"👤 {user_link}\n"
                 f"🌐 Сеть: *{network}*, Город: *{city}*\n"
-                f"🕐 {escape_md(time_formatted)}\n"
+                f"🕐 {time_formatted}\n"
                 f"❌ Причина: _{reason}_\n\n"
             )
 
@@ -1259,8 +1262,6 @@ def show_post_history(call):
                 network = escape_md(network)
                 city = escape_md(city)
                 deleted_by = escape_md(str(deleted_by)) if deleted else ""
-
-                # ⚠️ Важно: правильный chat_id без -100
                 chat_id_short = str(chat_id).replace("-100", "")
 
                 report += f"👤 *Юзер:* {user_display}\n"
@@ -1383,11 +1384,12 @@ def show_statistics_for_admin(chat_id):
         try:
             user_info = bot.get_chat(user_id)
             user_name = get_user_name(user_info)
+            user_link = f"[{escape_md(user_name)}](https://t.me/{user_info.username})" if user_info.username else escape_md(user_name)
         except:
-            user_name = f"ID `{user_id}`"
+            user_link = f"ID `{user_id}`"
 
         response += (
-            f"👤 {user_name}\n"
+            f"👤 {user_link}\n"
             f"📨 Опубликовано: *{user_stats['published']}*\n"
             f"📉 Осталось: *{user_stats['remaining']}*\n"
         )
@@ -1414,14 +1416,12 @@ def show_statistics_for_admin(chat_id):
                                 expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
                             break
 
-                    # 🏙 Уточняем названия всех городов (если чатов несколько)
-                    location_names = []
-                    for loc in all_cities.get(city, {}).get(net_key, []):
-                        location_names.append(loc["name"])
+                    # 🏙 Названия всех связанных групп
+                    location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
                     location_str = ", ".join(location_names) if location_names else city
 
                     response += (
-                        f"  └ 🧩 *{network}*, 📍*{city}* → {location_str} {expire_str}: "
+                        f"  └ 🧩 *{escape_md(network)}*, 📍*{escape_md(city)}* → {escape_md(location_str)} {expire_str}: "
                         f"*{data['published']} / {data['remaining']}*\n"
                     )
 
@@ -1429,14 +1429,14 @@ def show_statistics_for_admin(chat_id):
             unique_links = list(set(user_stats["links"]))
             response += "🔗 *Ссылки на публикации:*\n"
             for link in unique_links:
-                response += f"  • {link}\n"
+                response += f"  • {escape_md(link)}\n"
 
         response += "\n"
 
     try:
-        bot.send_message(chat_id, response, parse_mode="Markdown")
+        bot.send_message(chat_id, response, parse_mode="MarkdownV2")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {e}")
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {escape_md(str(e))}", parse_mode="MarkdownV2")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
