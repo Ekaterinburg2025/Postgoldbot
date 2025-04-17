@@ -1303,31 +1303,38 @@ def show_paid_users(message):
         bot.send_message(message.chat.id, "Нет данных об оплативших пользователях.")
         return
 
-    response = "📋 Список оплативших пользователей:\n"
+    response = "📋 <b>Список оплативших пользователей:</b>\n"
     for user_id, entries in paid_users.items():
         try:
             user_info = bot.get_chat(user_id)
-            user_name = get_user_name(user_info)
-        except Exception:
-            user_name = f"(ID: {user_id})"
+            name = escape_html(user_info.first_name or "")
+            username = user_info.username
+            id_link = f"<a href='tg://user?id={user_id}'>{user_id}</a>"
 
-        response += f"\n👤 Пользователь {user_name} (ID: {user_id}):\n"
+            if username:
+                full_name = f"{name} (@{username})"
+            else:
+                full_name = f"{name}"
+
+            user_line = f"👤 <b>Пользователь:</b> {id_link} | {full_name}"
+        except Exception:
+            user_line = f"👤 <b>Пользователь:</b> <code>{user_id}</code>"
+
+        response += f"\n{user_line}\n"
 
         for entry in entries:
-            network = entry.get("network")
-            city = entry.get("city")
-            net_key = normalize_network_key(network)
+            network = escape_html(entry.get("network"))
+            city = escape_html(entry.get("city"))
+            net_key = normalize_network_key(entry.get("network"))
 
-            # Получаем все названия групп, если город связан с несколькими чатами
             city_names = []
             if all_cities.get(city) and net_key in all_cities[city]:
-                city_names = [group["name"] for group in all_cities[city][net_key]]
+                city_names = [escape_html(group["name"]) for group in all_cities[city][net_key]]
             else:
-                city_names = [city]  # fallback
+                city_names = [escape_html(city)]
 
             city_display = ", ".join(city_names)
 
-            # Дата
             end_date = entry.get("end_date")
             if isinstance(end_date, str):
                 try:
@@ -1339,7 +1346,7 @@ def show_paid_users(message):
 
             response += f" - Сеть: {network}, Город: {city_display}, Срок: {date_str}\n"
 
-    bot.send_message(message.chat.id, response)
+    bot.send_message(message.chat.id, response, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("change_duration_"))
 def handle_duration_change(call):
