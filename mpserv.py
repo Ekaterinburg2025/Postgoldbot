@@ -20,7 +20,7 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
-# Собственная функция для экранирования спецсимволов Markdown
+# Собственная функция для экранирования спецсимволов MarkdownV2
 def escape_md(text):
     if not isinstance(text, str):
         text = str(text)
@@ -876,7 +876,7 @@ def save_data(retries=3, delay=0.5):
                     bot.send_message(
                         ADMIN_CHAT_ID,
                         f"✅ *Сохранено в базу:*\n👤 Оплативших: *{len(paid_users)}*\n📬 Постов: *{len(user_posts)}*\n👮 Админов: *{len(admins)}*",
-                        parse_mode="Markdown"
+                        parse_mode="MarkdownV2"
                     )
                     return
 
@@ -1074,7 +1074,7 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
-    bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="MarkdownV2")
 
 # Обработчик callback-запросов админ-панели
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
@@ -1277,11 +1277,11 @@ def show_post_history(call):
                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
                 report += f"⚠️ Ошибка в записи: {escape_md(str(inner_e))}\n\n"
 
-        bot.send_message(call.message.chat.id, report, parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, report, parse_mode="MarkdownV2")
 
     except Exception as e:
         print(f"[ERROR] История постов: {e}")
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {escape_md(str(e))}", parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {escape_md(str(e))}", parse_mode="MarkdownV2")
 
 # Функция для добавления администратора
 def add_admin_step(message):
@@ -1728,11 +1728,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             chat_id = location["chat_id"]
             try:
                 if media_type == "photo":
-                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="MarkdownV2")
                 elif media_type == "video":
-                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="Markdown")
+                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="MarkdownV2")
                 else:
-                    sent_message = bot.send_message(chat_id, full_text, parse_mode="Markdown")
+                    sent_message = bot.send_message(chat_id, full_text, parse_mode="MarkdownV2")
 
                 # ✅ Сохраняем в user_posts (добавили user_name!)
                 if user_id not in user_posts:
@@ -1847,7 +1847,7 @@ def handle_stats_button(message):
                         f"     • Опубликовано: *{data['published']}*, Осталось: *{data['remaining']}*\n"
                     )
 
-        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        bot.send_message(message.chat.id, response, parse_mode="MarkdownV2")
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Произошла ошибка при получении статистики: {e}")
@@ -1871,7 +1871,7 @@ def delete_user_posts_step(message):
         markup.add(types.InlineKeyboardButton("✅ Удалить все", callback_data=f"confirm_delete_{user_id}"))
         markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_delete"))
 
-        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="MarkdownV2")
 
     except ValueError:
         bot.send_message(message.chat.id, "❌ Введите корректный числовой ID.")
@@ -1901,7 +1901,7 @@ def handle_delete_confirmation(call):
         f"✅ Удалено {deleted} объявлений пользователя ID: `{user_id}`.",
         call.message.chat.id,
         call.message.message_id,
-        parse_mode="Markdown"
+        parse_mode="MarkdownV2"
     )
 
 @app.route('/webhook', methods=['POST'])
