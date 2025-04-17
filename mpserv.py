@@ -1430,30 +1430,34 @@ def clear_old_stats():
 
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
-     if not is_admin(chat_id):
-         bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
-         return
- 
+    if not is_admin(chat_id):
+        bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
+        return
+
     stats = get_admin_statistics()
-     if not stats:
-         bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
-         return
- 
-     response = "<b>📊 Статистика публикаций:</b>\n\n"
- 
-     for user_id, user_stats in stats.items():
-         try:
-             user_info = bot.get_chat(user_id)
-             user_name = escape_html(user_info.first_name)
-             user_link = f"<a href='https://t.me/{user_info.username}'>{user_name}</a>" if user_info.username else f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
-         except:
-             user_link = f"ID <code>{user_id}</code>"
- 
-         response += (
-             f"👤 {user_link}\n"
-             f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
-             f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
-         )
+    if not stats:
+        bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
+        return
+
+    response = "<b>📊 Статистика публикаций:</b>\n\n"
+
+    for user_id, user_stats in stats.items():
+        try:
+            user_info = bot.get_chat(user_id)
+            user_name = escape_html(user_info.first_name)
+            user_link = (
+                f"<a href='https://t.me/{user_info.username}'>{user_name}</a>"
+                if user_info.username else
+                f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
+            )
+        except:
+            user_link = f"ID <code>{user_id}</code>"
+
+        response += (
+            f"👤 {user_link}\n"
+            f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
+            f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
+        )
  
          if user_stats["details"]:
              response += "🧾 <b>Детали по сетям и городам:</b>\n"
