@@ -1714,9 +1714,16 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = escape_html(get_user_name(message.from_user))
+    username_link = message.from_user.username
+    display_name = escape_html(get_user_name(message.from_user))
     text = escape_html(text)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+
+    # Создание user_name
+    if username_link:
+        user_name = f'<b><a href="https://t.me/{username_link}">{display_name}</a></b>'
+    else:
+        user_name = f'<b>{display_name}</b>'
 
     was_published = False
 
@@ -1734,22 +1741,28 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
-            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для <b>{network}</b>, город <b>{escape_html(city)}</b>", parse_mode="HTML")
+            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для <b>{escape_html(network)}</b>, город <b>{escape_html(city)}</b>", parse_mode="HTML")
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
         signature = escape_html(network_signatures.get(network, ""))
-        full_text = f"📢 <b>Объявление от {user_name}</b>:\n\n{text}\n\n{signature}"
+        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
+        # Кнопка "Написать", если нет username
+        reply_markup = None
+        if not username_link:
+            reply_markup = types.InlineKeyboardMarkup()
+            reply_markup.add(types.InlineKeyboardButton("✉️ Написать", url=f"tg://user?id={user_id}"))
 
         for location in city_data:
             chat_id = location["chat_id"]
             try:
                 if media_type == "photo":
-                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML")
+                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
                 elif media_type == "video":
-                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML")
+                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
                 else:
-                    sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML")
+                    sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
                 # ✅ Добавляем в user_posts
                 if user_id not in user_posts:
@@ -1761,13 +1774,13 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": user_name
+                    "user_name": display_name
                 })
 
                 # ✅ Добавляем в post_history
                 add_post_to_history(
                     user_id=user_id,
-                    user_name=user_name,
+                    user_name=display_name,
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
@@ -1832,19 +1845,18 @@ def handle_stats_button(message):
         stats = get_user_statistics(user_id)
 
         response = (
-            f"📊 *Ваша статистика на сегодня:*\n"
-            f"📨 Опубликовано: *{stats['published']}*\n"
-            f"📉 Осталось публикаций: *{stats['remaining']}*\n"
+            f"📊 <b>Ваша статистика на сегодня:</b>\n"
+            f"📨 Опубликовано: <b>{stats['published']}</b>\n"
+            f"📉 Осталось публикаций: <b>{stats['remaining']}</b>\n"
         )
 
         if stats["details"]:
-            response += "\n🗂️ *Детали по сетям и городам:*\n"
+            response += "\n🗂️ <b>Детали по сетям и городам:</b>\n"
             for network, cities in stats["details"].items():
                 net_key = normalize_network_key(network)
                 for city, data in cities.items():
                     expire_str = "⏳ неизвестно"
 
-                    # Найдём дату окончания
                     for paid in paid_users.get(user_id, []):
                         if normalize_network_key(paid["network"]) == net_key and paid["city"] == city:
                             end = paid.get("end_date")
@@ -1857,18 +1869,15 @@ def handle_stats_button(message):
                                 expire_str = f"⏳ до {end.strftime('%d.%m.%Y')}"
                             break
 
-                    # Уточнение: какие чаты покрываются
-                    location_names = []
-                    for loc in all_cities.get(city, {}).get(net_key, []):
-                        location_names.append(loc["name"])
+                    location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
                     location_str = ", ".join(location_names) if location_names else city
 
                     response += (
-                        f"  └ 🧩 *{network}*, 📍*{city}* → {location_str} {expire_str}:\n"
-                        f"     • Опубликовано: *{data['published']}*, Осталось: *{data['remaining']}*\n"
+                        f"  └ 🧩 <b>{network}</b>, 📍<b>{city}</b> → {location_str} {expire_str}:\n"
+                        f"     • Опубликовано: <b>{data['published']}</b>, Осталось: <b>{data['remaining']}</b>\n"
                     )
 
-        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        bot.send_message(message.chat.id, response, parse_mode="HTML")
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Произошла ошибка при получении статистики: {e}")
@@ -1882,20 +1891,21 @@ def delete_user_posts_step(message):
             return
 
         # Формируем список постов
-        preview = f"📋 Найдено *{len(user_posts[user_id])}* объявлений у пользователя ID `{user_id}`:\n\n"
+        preview = f"📋 Найдено <b>{len(user_posts[user_id])}</b> объявлений у пользователя ID <code>{user_id}</code>:\n\n"
         for post in user_posts[user_id]:
             date_str = format_time(post["time"])
-            preview += f"• 🧩 *{post['network']}* | 📍*{post['city']}* | 🕒 {date_str}\n"
+            preview += f"• 🧩 <b>{post['network']}</b> | 📍<b>{post['city']}</b> | 🕒 {date_str}\n"
 
         # Кнопки: подтвердить / отменить
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Удалить все", callback_data=f"confirm_delete_{user_id}"))
         markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_delete"))
 
-        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="HTML")
 
     except ValueError:
         bot.send_message(message.chat.id, "❌ Введите корректный числовой ID.")
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete_") or call.data == "cancel_delete")
 def handle_delete_confirmation(call):
@@ -1919,10 +1929,10 @@ def handle_delete_confirmation(call):
         save_data()
 
     bot.edit_message_text(
-        f"✅ Удалено {deleted} объявлений пользователя ID: `{user_id}`.",
+        f"✅ Удалено {deleted} объявлений пользователя ID: <code>{user_id}</code>.",
         call.message.chat.id,
         call.message.message_id,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @app.route('/webhook', methods=['POST'])
