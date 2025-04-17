@@ -1434,7 +1434,6 @@ def show_statistics_for_admin(chat_id):
          bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
          return
  
-     stats = get_admin_statistics()
     stats = get_admin_statistics()
      if not stats:
          bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
