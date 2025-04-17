@@ -1204,7 +1204,7 @@ def show_failed_attempts(call):
                 name = get_user_name(user)
                 escaped_name = escape_md(name)
                 if user.username and re.match(r"^[A-Za-z0-9_]{5,}$", user.username):
-                    user_link = f"[{escaped_name}](https://t.me/{user.username})"
+                    user_link = f"[{escaped_name}](https://t.me/{escape_md(user.username)}"
                 else:
                     user_link = f"*{escaped_name}*"
             except:
