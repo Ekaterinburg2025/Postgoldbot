@@ -1458,46 +1458,46 @@ def show_statistics_for_admin(chat_id):
             f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
             f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
         )
- 
-         if user_stats["details"]:
-             response += "🧾 <b>Детали по сетям и городам:</b>\n"
-             for network, cities in user_stats["details"].items():
-                 net_key = normalize_network_key(network)
-                 for city, data in cities.items():
-                     expire_str = "(неизвестно)"
-                     for paid in paid_users.get(user_id, []):
-                         if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
-                             end_date = paid.get("end_date")
-                             if isinstance(end_date, str):
-                                 try:
-                                     end_date = datetime.fromisoformat(end_date)
-                                 except:
-                                     end_date = None
-                             if isinstance(end_date, datetime):
-                                 expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
-                             break
- 
-                     location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
-                     location_str = ", ".join(location_names) if location_names else city
- 
-                     response += (
-                         f"  └ 🧩 <b>{escape_html(network)}</b>, 📍<b>{escape_html(city)}</b> → "
-                         f"{escape_html(location_str)} {expire_str}: "
-                         f"<b>{data['published']} / {data['remaining']}</b>\n"
-                     )
- 
-         if user_stats["links"]:
-             unique_links = list(set(user_stats["links"]))
-             response += "🔗 <b>Ссылки на публикации:</b>\n"
-             for link in unique_links:
-                 response += f"  • <a href='{link}'>{link}</a>\n"
- 
-         response += "\n"
- 
-     try:
-         bot.send_message(chat_id, response, parse_mode="HTML")
-     except Exception as e:
-         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
+
+        if user_stats["details"]:
+            response += "🧾 <b>Детали по сетям и городам:</b>\n"
+            for network, cities in user_stats["details"].items():
+                net_key = normalize_network_key(network)
+                for city, data in cities.items():
+                    expire_str = "(неизвестно)"
+                    for paid in paid_users.get(user_id, []):
+                        if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
+                            end_date = paid.get("end_date")
+                            if isinstance(end_date, str):
+                                try:
+                                    end_date = datetime.fromisoformat(end_date)
+                                except:
+                                    end_date = None
+                            if isinstance(end_date, datetime):
+                                expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
+                            break
+
+                    location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
+                    location_str = ", ".join(location_names) if location_names else city
+
+                    response += (
+                        f"  └ 🧩 <b>{escape_html(network)}</b>, 📍<b>{escape_html(city)}</b> → "
+                        f"{escape_html(location_str)} {expire_str}: "
+                        f"<b>{data['published']} / {data['remaining']}</b>\n"
+                    )
+
+        if user_stats["links"]:
+            unique_links = list(set(user_stats["links"]))
+            response += "🔗 <b>Ссылки на публикации:</b>\n"
+            for link in unique_links:
+                response += f"  • <a href='{link}'>{link}</a>\n"
+
+        response += "\n"
+
+    try:
+        bot.send_message(chat_id, response, parse_mode="HTML")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
