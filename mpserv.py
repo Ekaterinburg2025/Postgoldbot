@@ -1267,7 +1267,6 @@ def show_failed_attempts(call):
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
- def show_post_history(call):
 def show_post_history(call):
      try:
          print("[DEBUG] Нажата кнопка истории постов")
