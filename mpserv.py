@@ -703,6 +703,12 @@ def is_today(timestamp):
     except:
         return False
 
+from datetime import datetime
+import pytz
+
+def now_ekb():
+    return datetime.now(pytz.timezone('Asia/Yekaterinburg'))
+
 def get_admin_statistics():
     statistics = {}
 
@@ -741,7 +747,7 @@ def get_admin_statistics():
                         user_post["network"] == network and
                         user_post["city"] == city and
                         isinstance(user_post.get("time"), datetime) and
-                        user_post["time"].date() == today
+                        user_post["time"].astimezone(pytz.timezone('Asia/Yekaterinburg')).date() == today
                     ):
                         link = f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
                         links.add(link)
@@ -1285,8 +1291,16 @@ def show_post_history(call):
         for post in page_posts:
             try:
                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
-                time = datetime.fromisoformat(time_str)
-                formatted_time = time.strftime('%d.%m.%Y %H:%M')
+
+                # 🕒 Парсинг времени с защитой
+                try:
+                    time = datetime.fromisoformat(time_str)
+                    if time.tzinfo is not None:
+                        time = time.replace(tzinfo=None)
+                    formatted_time = time.strftime('%d.%m.%Y %H:%M')
+                except Exception as time_parse_error:
+                    print(f"[ERROR] Не удалось распарсить дату: {time_str} → {time_parse_error}")
+                    formatted_time = time_str
 
                 # 🔍 Попытка вытянуть имя, если неизвестно
                 if not user_name or user_name.lower() == "неизвестен":
@@ -1296,13 +1310,13 @@ def show_post_history(call):
                     except:
                         user_name = "неизвестен"
 
-                # Создаем кликабельное имя пользователя
+                # Создаём кликабельное имя
                 user_link = f"<a href='tg://user?id={user_id}'>{escape_html(user_name)}</a> (ID: <code>{user_id}</code>)"
                 network = escape_html(network)
                 city = escape_html(city)
                 chat_id_short = str(chat_id).replace("-100", "")
 
-                # 🗑 Обработка статуса удаления
+                # 🗑 Обработка удаления
                 if deleted:
                     deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
                     status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
@@ -1320,6 +1334,10 @@ def show_post_history(call):
             except Exception as inner_e:
                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
                 report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
+
+        # 🧱 Ограничение на длину сообщения
+        if len(report) > 4000:
+            report = report[:3900] + "\n\n⚠️ Данные урезаны, слишком длинное сообщение."
 
         # Кнопки «назад/вперёд»
         keyboard = InlineKeyboardMarkup()
