@@ -7,6 +7,7 @@ from collections import defaultdict
 import threading
 import shutil
 import re
+from urllib.parse import quote
 
 import pytz
 from pytz import timezone
@@ -1204,7 +1205,9 @@ def show_failed_attempts(call):
                 name = get_user_name(user)
                 escaped_name = escape_md(name)
                 if user.username and re.match(r"^[A-Za-z0-9_]{5,}$", user.username):
-                    user_link = f"[{escaped_name}](https://t.me/{escape_md(user.username)}"
+                    # Кодируем username для URL и формируем ссылку
+                    username_encoded = quote(user.username)
+                    user_link = f"[{escaped_name}](https://t.me/{username_encoded})"
                 else:
                     user_link = f"*{escaped_name}*"
             except:
@@ -1216,6 +1219,7 @@ def show_failed_attempts(call):
             except:
                 time_formatted = "неизвестно"
 
+            # Экранируем все строки
             network = escape_md(network)
             city = escape_md(city)
             reason = escape_md(reason)
@@ -1228,10 +1232,14 @@ def show_failed_attempts(call):
                 f"❌ Причина: _{reason}_\n\n"
             )
 
+        # Логирование перед отправкой
+        print(f"Отправляемое сообщение: {response}")
         bot.send_message(call.message.chat.id, response, parse_mode="MarkdownV2")
         bot.answer_callback_query(call.id)
 
     except Exception as e:
+        # Логирование ошибки
+        print(f"Ошибка: {e}")
         bot.send_message(
             call.message.chat.id,
             f"❌ Ошибка при получении попыток: {escape_md(str(e))}",
@@ -1444,9 +1452,9 @@ def show_statistics_for_admin(chat_id):
         response += "\n"
 
     try:
-        bot.send_message(chat_id, response, parse_mode="MarkdownV2")
+        bot.send_message(chat_id, response, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {escape_md(str(e))}", parse_mode="MarkdownV2")
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {escape_md(str(e))}", parse_mode="Markdown")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
