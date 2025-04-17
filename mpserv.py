@@ -1429,7 +1429,6 @@ def clear_old_stats():
         user_posts[user_id] = [post for post in posts if now - post["time"] < timedelta(days=1)]
 
 @bot.message_handler(commands=['statistics'])
- def show_statistics_for_admin(chat_id):
 def show_statistics_for_admin(chat_id):
      if not is_admin(chat_id):
          bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
