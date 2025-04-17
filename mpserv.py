@@ -20,6 +20,12 @@ from pytz import timezone
 
 def now_ekb():
     return datetime.now(timezone('Asia/Yekaterinburg'))
+# Убедись, что используешь одну временную зону для всех дат
+ekb_tz = pytz.timezone('Asia/Yekaterinburg')
+
+# Приведение времени к aware-дате
+time = time.astimezone(ekb_tz)  # Преобразуем время в aware-дату с учётом временной зоны
+today = now_ekb().astimezone(ekb_tz).date()
 
 import telebot
 from telebot import types
@@ -712,9 +718,6 @@ def now_ekb():
 def get_admin_statistics():
     statistics = {}
 
-    ekb_tz = pytz.timezone('Asia/Yekaterinburg')
-    today_aware = now_ekb().date()
-
     for user_id, networks in user_daily_posts.items():
         stats = {
             "published": 0,
@@ -724,21 +727,15 @@ def get_admin_statistics():
         }
         limit_total = 0
         links = set()
+        today = now_ekb().date()  # Переходим к датам без учета времени
 
         for network, cities in networks.items():
             stats["details"][network] = {}
 
             for city, post_data in cities.items():
-                # Преобразуем все даты в aware с таймзоной
-                def to_aware(dt):
-                    if dt.tzinfo is None:
-                        return ekb_tz.localize(dt)
-                    return dt.astimezone(ekb_tz)
-
-                today_posts = [p for p in post_data.get("posts", [])
-                               if isinstance(p, datetime) and to_aware(p).date() == today_aware]
-                today_deleted = [p for p in post_data.get("deleted_posts", [])
-                                 if isinstance(p, datetime) and to_aware(p).date() == today_aware]
+                # Оставляем только сегодняшние посты
+                today_posts = [p for p in post_data.get("posts", []) if isinstance(p, datetime) and p.date() == today]
+                today_deleted = [p for p in post_data.get("deleted_posts", []) if isinstance(p, datetime) and p.date() == today]
 
                 total_posts = len(today_posts) + len(today_deleted)
                 limit_total += 3
@@ -750,12 +747,14 @@ def get_admin_statistics():
 
                 stats["published"] += total_posts
 
+                # Ссылки только на сегодняшние посты
                 for user_post in user_posts.get(user_id, []):
-                    post_time = user_post.get("time")
-                    if (user_post["network"] == network and
+                    if (
+                        user_post["network"] == network and
                         user_post["city"] == city and
-                        isinstance(post_time, datetime) and
-                        to_aware(post_time).date() == today_aware):
+                        isinstance(user_post.get("time"), datetime) and
+                        user_post["time"].date() == today  # Сравниваем только даты
+                    ):
                         link = f"https://t.me/c/{str(user_post['chat_id'])[4:]}/{user_post['message_id']}"
                         links.add(link)
 
@@ -1269,13 +1268,10 @@ def show_failed_attempts(call):
         bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_post_history"))
+@bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
 def show_post_history(call):
     try:
-        print("[DEBUG] Нажата кнопка истории постов")  # лог для отладки
-
-        parts = call.data.split(":")
-        page = int(parts[1]) if len(parts) > 1 else 0
+        print("[DEBUG] Нажата кнопка истории постов")
 
         with db_lock:
             with sqlite3.connect("bot_data.db") as conn:
@@ -1284,88 +1280,66 @@ def show_post_history(call):
                     SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
                     FROM post_history
                     ORDER BY time DESC
+                    LIMIT 100
                 """)
                 posts = cur.fetchall()
 
-        total_pages = (len(posts) - 1) // POSTS_PER_PAGE + 1
-        page_posts = posts[page * POSTS_PER_PAGE: (page + 1) * POSTS_PER_PAGE]
+        print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
 
-        if not page_posts:
+        if not posts:
             bot.send_message(call.message.chat.id, "История постов пуста.")
             return
 
-        report = f"<b>📜 История публикаций (стр. {page + 1} из {total_pages}):</b>\n\n"
-
-        for post in page_posts:
+        report = "<b>📜 История публикаций:</b>\n\n"
+        for post in posts:
             try:
                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
-                time = datetime.fromisoformat(time_str)
+                
+                # Обработка времени, возможно с учетом часового пояса
+                try:
+                    time = datetime.fromisoformat(time_str)
+                except ValueError as ve:
+                    print(f"[ERROR] Ошибка преобразования времени: {ve}")
+                    continue
                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
 
-                # 🔍 Попытка получить имя, если неизвестно
+                # 🔍 Попытка вытянуть имя, если неизвестно
                 if not user_name or user_name.lower() == "неизвестен":
                     try:
                         user_info = bot.get_chat(user_id)
                         user_name = user_info.first_name or "неизвестен"
-                    except:
+                    except Exception as e:
+                        print(f"[ERROR] Ошибка при получении имени пользователя: {e}")
                         user_name = "неизвестен"
 
-                user_link = f"<a href='tg://user?id={user_id}'>{escape_html(user_name)}</a> (ID: <code>{user_id}</code>)"
+                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
                 network = escape_html(network)
                 city = escape_html(city)
                 chat_id_short = str(chat_id).replace("-100", "")
 
+                # 🗑 Обработка статуса удаления
                 if deleted:
                     deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
                     status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
                 else:
                     status_line = "✅ <b>Статус:</b> Активен"
 
-                post_block = (
-                    f"👤 <b>Юзер:</b> {user_link}\n"
-                    f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
-                    f"🕒 <b>Время:</b> {formatted_time}\n"
-                    f"{status_line}\n"
-                    f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
-                )
-
-                if len(report) + len(post_block) > 4000:
-                    report += "⚠️ Слишком много записей. Некоторые пропущены.\n\n"
-                    break
-
-                report += post_block
+                # Формирование отчета
+                report += f"👤 <b>Юзер:</b> {user_display}\n"
+                report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                report += f"🕒 <b>Время:</b> {formatted_time}\n"
+                report += f"{status_line}\n"
+                report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
 
             except Exception as inner_e:
                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
                 report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
 
-        # Кнопки навигации
-        keyboard = InlineKeyboardMarkup()
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_post_history:{page - 1}"))
-        if (page + 1) * POSTS_PER_PAGE < len(posts):
-            nav_buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"admin_post_history:{page + 1}"))
-        if nav_buttons:
-            keyboard.row(*nav_buttons)
-
-        bot.edit_message_text(
-            report,
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
-        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, report, parse_mode="HTML")
 
     except Exception as e:
         print(f"[ERROR] История постов: {e}")
-        bot.send_message(
-            call.message.chat.id,
-            f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>",
-            parse_mode="HTML"
-        )
-        bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
 # Функция для добавления администратора
 def add_admin_step(message):
