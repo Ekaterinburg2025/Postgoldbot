@@ -1662,15 +1662,16 @@ def select_network(message, text, media_type, file_id):
         bot.register_next_step_handler(message, process_text)
         return
 
-    selected_network = message.text
-    if selected_network in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
+    selected_network = message.text.strip()
+    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
+
+    if selected_network in valid_networks:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
 
         if selected_network == "Все сети":
             # Только города, которые есть минимум в 2 сетях
             cities = [city for city, nets in all_cities.items() if len(nets) >= 2]
         else:
-            # Показываем города только из выбранной сети
             key = normalize_network_key(selected_network)
             cities = [city for city, nets in all_cities.items() if key in nets]
 
@@ -1680,13 +1681,17 @@ def select_network(message, text, media_type, file_id):
 
         bot.send_message(
             message.chat.id,
-            "📍 Выберите город для публикации или нажмите 'Выбрать другую сеть':",
-            reply_markup=markup
+            "📍 <b>Выберите город</b> для публикации или нажмите «<i>Выбрать другую сеть</i>»:",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
         bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
-
     else:
-        bot.send_message(message.chat.id, "❌ Ошибка! Выберите правильную сеть.")
+        bot.send_message(
+            message.chat.id,
+            "❌ <b>Ошибка!</b> Пожалуйста, выберите одну из предложенных сетей.",
+            parse_mode="HTML"
+        )
         bot.register_next_step_handler(message, process_text)
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
@@ -1702,7 +1707,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = get_user_name(message.from_user)
+    user_name = escape_html(get_user_name(message.from_user))
+    text = escape_html(text)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
@@ -1721,22 +1727,22 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
-            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для {network}, город {city}")
+            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для <b>{network}</b>, город <b>{escape_html(city)}</b>", parse_mode="HTML")
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")
-        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+        signature = escape_html(network_signatures.get(network, ""))
+        full_text = f"📢 <b>Объявление от {user_name}</b>:\n\n{text}\n\n{signature}"
 
         for location in city_data:
             chat_id = location["chat_id"]
             try:
                 if media_type == "photo":
-                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="MarkdownV2")
+                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML")
                 elif media_type == "video":
-                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="MarkdownV2")
+                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML")
                 else:
-                    sent_message = bot.send_message(chat_id, full_text, parse_mode="MarkdownV2")
+                    sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML")
 
                 # ✅ Добавляем в user_posts
                 if user_id not in user_posts:
@@ -1751,7 +1757,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "user_name": user_name
                 })
 
-                # ✅ Добавляем в историю
+                # ✅ Добавляем в post_history
                 add_post_to_history(
                     user_id=user_id,
                     user_name=user_name,
@@ -1771,24 +1777,28 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
                 user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
 
-                bot.send_message(message.chat.id, f"✅ Объявление опубликовано в сети «{network}», городе {location['name']}.")
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ Объявление опубликовано в сети <b>{escape_html(network)}</b>, городе <b>{escape_html(location['name'])}</b>.",
+                    parse_mode="HTML"
+                )
                 was_published = True
 
             except telebot.apihelper.ApiTelegramException as e:
                 log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e.description}")
-                bot.send_message(message.chat.id, f"❌ Ошибка: {e.description}")
+                bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
         markup = types.InlineKeyboardMarkup()
-        if selected_network == "Мужской Клуб":
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
-        else:
-            markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.", reply_markup=markup)
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
+        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
+        bot.send_message(
+            message.chat.id,
+            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
+            reply_markup=markup
+        )
 
-    # 💾 Сохраняем даже при отсутствии публикации (важны попытки!)
     save_data()
-
     ask_for_new_post(message)
 
 def ask_for_new_post(message):
