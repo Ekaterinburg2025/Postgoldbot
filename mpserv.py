@@ -1085,7 +1085,7 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("⏳ Изменить срок оплаты", callback_data="admin_change_duration"))
     markup.add(types.InlineKeyboardButton("👑 Добавить администратора", callback_data="admin_add_admin"))
     markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
-    markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts:0))
+    markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts:0"))
     markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history:0"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
