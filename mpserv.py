@@ -20,11 +20,21 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
-# Собственная функция для экранирования спецсимволов MarkdownV2
 def escape_md(text):
+    """
+    Экранирует спецсимволы MarkdownV2, но оставляет пробелы, точки, запятые и эмодзи без изменений.
+    Возвращает пустую строку, если текст состоит только из пробелов или пуст.
+    """
     if not isinstance(text, str):
         text = str(text)
+    
+    # Если текст пустой или состоит только из пробелов
+    if not text.strip():
+        return ""
+    
+    # Экранируем только спецсимволы MarkdownV2
     text = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    
     return text
 
 # Получаем токен из переменной окружения
@@ -1074,7 +1084,7 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
-    bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="MarkdownV2")
+    bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
 
 # Обработчик callback-запросов админ-панели
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
