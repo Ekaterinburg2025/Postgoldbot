@@ -22,6 +22,13 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
+# Собственная функция для экранирования спецсимволов Markdown
+def escape_md(text):
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    for ch in escape_chars:
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
 def escape_html(text):
     """
     Экранирует спецсимволы для HTML.
