@@ -167,41 +167,41 @@ def log_failed_attempt(user_id, network, city, reason):
         print(f"[ERROR] Ошибка при логировании неудачной попытки: {e}")
 
 def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, deleted=False, deleted_by=None):
-    """
-    Сохраняет пост в таблицу post_history.
-    """
-    post_time = now_ekb()
-    post_data = {
-        "user_id": user_id,
-        "user_name": user_name,
-        "network": network,
-        "city": city,
-        "time": post_time,
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "deleted": deleted,
-        "deleted_by": deleted_by
-    }
-
-    # Сохраняем пост в post_history
-    with db_lock:
-        with sqlite3.connect("bot_data.db") as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO post_history (user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                post_data["user_id"],
-                post_data["user_name"],
-                post_data["network"],
-                post_data["city"],
-                post_data["time"].isoformat(),
-                post_data["chat_id"],
-                post_data["message_id"],
-                int(post_data["deleted"]),
-                post_data["deleted_by"]
-            ))
-            conn.commit()
+     """
+     Сохраняет пост в таблицу post_history.
+     """
+     post_time = now_ekb()
+     post_data = {
+         "user_id": user_id,
+         "user_name": user_name,
+         "network": network,
+         "city": city,
+         "time": post_time,
+         "chat_id": chat_id,
+         "message_id": message_id,
+         "deleted": deleted,
+         "deleted_by": deleted_by
+     }
+ 
+     # Сохраняем пост в post_history
+     with db_lock:
+         with sqlite3.connect("bot_data.db") as conn:
+             cur = conn.cursor()
+             cur.execute("""
+                 INSERT INTO post_history (user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             """, (
+                 post_data["user_id"],
+                 post_data["user_name"],
+                 post_data["network"],
+                 post_data["city"],
+                 post_data["time"].isoformat(),
+                 post_data["chat_id"],
+                 post_data["message_id"],
+                 int(post_data["deleted"]),
+                 post_data["deleted_by"]
+             ))
+             conn.commit()
 
 # Загрузка данных из базы данных
 def load_data():
@@ -1267,78 +1267,71 @@ def show_failed_attempts(call):
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
+ def show_post_history(call):
 def show_post_history(call):
-    try:
-        print("[DEBUG] Нажата кнопка истории постов")
-
-        with db_lock:
-            with sqlite3.connect("bot_data.db") as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
-                    FROM post_history
-                    ORDER BY time DESC
-                    LIMIT 100
-                """)
-                posts = cur.fetchall()
-
-        print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
-
-        if not posts:
-            bot.send_message(call.message.chat.id, "История постов пуста.")
-            return
-
-        report = "<b>📜 История публикаций:</b>\n\n"
-        for post in posts:
-            try:
-                user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
-                
-                # Обработка времени, возможно с учетом часового пояса
-                try:
-                    time = datetime.fromisoformat(time_str)
-                except ValueError as ve:
-                    print(f"[ERROR] Ошибка преобразования времени: {ve}")
-                    continue
-                formatted_time = time.strftime('%d.%m.%Y %H:%M')
-
-                # 🔍 Попытка вытянуть имя, если неизвестно
-                if not user_name or user_name.lower() == "неизвестен":
-                    try:
-                        user_info = bot.get_chat(user_id)
-                        user_name = user_info.first_name or "неизвестен"
-                    except Exception as e:
-                        print(f"[ERROR] Ошибка при получении имени пользователя: {e}")
-                        user_name = "неизвестен"
-
-                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
-                network = escape_html(network)
-                city = escape_html(city)
-                chat_id_short = str(chat_id).replace("-100", "")
-
-                # 🗑 Обработка статуса удаления
-                if deleted:
-                    deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
-                    status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
-                else:
-                    status_line = "✅ <b>Статус:</b> Активен"
-
-                # Формирование отчета
-                report += f"👤 <b>Юзер:</b> {user_display}\n"
-                report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
-                report += f"🕒 <b>Время:</b> {formatted_time}\n"
-                report += f"{status_line}\n"
-                report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
-
-            except Exception as inner_e:
-                print(f"[ERROR] Ошибка в записи истории: {inner_e}")
-                report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
-
-        bot.send_message(call.message.chat.id, report, parse_mode="HTML")
-
-    except Exception as e:
-        print(f"[ERROR] История постов: {e}")
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
-
+     try:
+         print("[DEBUG] Нажата кнопка истории постов")
+ 
+         with db_lock:
+             with sqlite3.connect("bot_data.db") as conn:
+                 cur = conn.cursor()
+                 cur.execute("""
+                     SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
+                     FROM post_history
+                     ORDER BY time DESC
+                     LIMIT 100
+                 """)
+                 posts = cur.fetchall()
+ 
+         print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
+ 
+         if not posts:
+             bot.send_message(call.message.chat.id, "История постов пуста.")
+             return
+ 
+         report = "<b>📜 История публикаций:</b>\n\n"
+         for post in posts:
+             try:
+                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+                 time = datetime.fromisoformat(time_str)
+                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
+ 
+                 # 🔍 Попытка вытянуть имя, если неизвестно
+                 if not user_name or user_name.lower() == "неизвестен":
+                     try:
+                         user_info = bot.get_chat(user_id)
+                         user_name = user_info.first_name or "неизвестен"
+                     except:
+                         user_name = "неизвестен"
+ 
+                 user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
+                 network = escape_html(network)
+                 city = escape_html(city)
+                 chat_id_short = str(chat_id).replace("-100", "")
+ 
+                 # 🗑 Обработка статуса удаления
+                 if deleted:
+                     deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
+                     status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
+                 else:
+                     status_line = "✅ <b>Статус:</b> Активен"
+ 
+                 report += f"👤 <b>Юзер:</b> {user_display}\n"
+                 report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                 report += f"🕒 <b>Время:</b> {formatted_time}\n"
+                 report += f"{status_line}\n"
+                 report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
+ 
+             except Exception as inner_e:
+                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
+                 report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
+ 
+         bot.send_message(call.message.chat.id, report, parse_mode="HTML")
+ 
+     except Exception as e:
+         print(f"[ERROR] История постов: {e}")
+         bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
+ 
 # Функция для добавления администратора
 def add_admin_step(message):
     try:
@@ -1437,87 +1430,73 @@ def clear_old_stats():
         user_posts[user_id] = [post for post in posts if now - post["time"] < timedelta(days=1)]
 
 @bot.message_handler(commands=['statistics'])
+ def show_statistics_for_admin(chat_id):
 def show_statistics_for_admin(chat_id):
-    if not is_admin(chat_id):
-        bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
-        return
-
-    # Очистка старой статистики
-    clear_old_stats()
-
+     if not is_admin(chat_id):
+         bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
+         return
+ 
+     stats = get_admin_statistics()
     stats = get_admin_statistics()
-    if not stats:
-        bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
-        return
-
-    response = "<b>📊 Статистика публикаций:</b>\n\n"
-
-    for user_id, user_stats in stats.items():
-        try:
-            user_info = bot.get_chat(user_id)
-            user_name = escape_html(user_info.first_name)
-            user_link = f"<a href='https://t.me/{user_info.username}'>{user_name}</a>" if user_info.username else f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
-        except Exception as e:
-            print(f"DEBUG: Ошибка получения данных пользователя {user_id}: {e}")
-            user_link = f"ID <code>{user_id}</code>"
-
-        response += (
-            f"👤 {user_link}\n"
-            f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
-            f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
-        )
-
-        if user_stats["details"]:
-            response += "🧾 <b>Детали по сетям и городам:</b>\n"
-            for network, cities in user_stats["details"].items():
-                net_key = normalize_work_key(network)
-                for city, data in cities.items():
-                    expire_str = "(неизвестно)"
-                    for paid in paid_users.get(user_id, []):
-                        print(f"DEBUG: Проверка записи оплаты для user_id={user_id}: network={paid.get('network')}, city={paid.get('city')}")
-                        if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
-                            end_date = paid.get("end_date")
-                            if isinstance(end_date, str):
-                                try:
-                                    end_date = datetime.fromisoformat(end_date)
-                                except ValueError:
-                                    print(f"DEBUG: Ошибка преобразования end_date: {end_date}")
-                                    end_date = None
-                            if isinstance(end_date, datetime):
-                                try:
-                                    if end_date >= now_ekb():  # <-- Исправлено здесь
-                                        expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
-                                        print(f"DEBUG: Найден срок для {network}, {city}: {expire_str}")
-                                    else:
-                                        print(f"DEBUG: Срок истёк для {network}, {city}")
-                                        expire_str = "(срок истёк)"
-                                except TypeError as te:
-                                    print(f"DEBUG: Ошибка сравнения дат: {te}")
-                            break
-                    else:
-                        print(f"DEBUG: Запись оплаты для {network}, {city} не найдена для user_id={user_id}")
-
-                    location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
-                    location_str = ", ".join(location_names) if location_names else city
-
-                    response += (
-                        f"  └ 🧩 <b>{escape_html(network)}</b>, 📍<b>{escape_html(city)}</b> → "
-                        f"{escape_html(location_str)} {expire_str}: "
-                        f"<b>{data['published']} / {data['remaining']}</b>\n"
-                    )
-
-        if user_stats["links"]:
-            unique_links = list(set(user_stats["links"]))
-            response += "🔗 <b>Ссылки на публикации:</b>\n"
-            for link in unique_links:
-                response += f"  • <a href='{link}'>{link}</a>\n"
-
-        response += "\n"
-
-    try:
-        bot.send_message(chat_id, response, parse_mode="HTML")
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
+     if not stats:
+         bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
+         return
+ 
+     response = "<b>📊 Статистика публикаций:</b>\n\n"
+ 
+     for user_id, user_stats in stats.items():
+         try:
+             user_info = bot.get_chat(user_id)
+             user_name = escape_html(user_info.first_name)
+             user_link = f"<a href='https://t.me/{user_info.username}'>{user_name}</a>" if user_info.username else f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
+         except:
+             user_link = f"ID <code>{user_id}</code>"
+ 
+         response += (
+             f"👤 {user_link}\n"
+             f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
+             f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
+         )
+ 
+         if user_stats["details"]:
+             response += "🧾 <b>Детали по сетям и городам:</b>\n"
+             for network, cities in user_stats["details"].items():
+                 net_key = normalize_network_key(network)
+                 for city, data in cities.items():
+                     expire_str = "(неизвестно)"
+                     for paid in paid_users.get(user_id, []):
+                         if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
+                             end_date = paid.get("end_date")
+                             if isinstance(end_date, str):
+                                 try:
+                                     end_date = datetime.fromisoformat(end_date)
+                                 except:
+                                     end_date = None
+                             if isinstance(end_date, datetime):
+                                 expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
+                             break
+ 
+                     location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
+                     location_str = ", ".join(location_names) if location_names else city
+ 
+                     response += (
+                         f"  └ 🧩 <b>{escape_html(network)}</b>, 📍<b>{escape_html(city)}</b> → "
+                         f"{escape_html(location_str)} {expire_str}: "
+                         f"<b>{data['published']} / {data['remaining']}</b>\n"
+                     )
+ 
+         if user_stats["links"]:
+             unique_links = list(set(user_stats["links"]))
+             response += "🔗 <b>Ссылки на публикации:</b>\n"
+             for link in unique_links:
+                 response += f"  • <a href='{link}'>{link}</a>\n"
+ 
+         response += "\n"
+ 
+     try:
+         bot.send_message(chat_id, response, parse_mode="HTML")
+     except Exception as e:
+         bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
