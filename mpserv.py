@@ -1266,7 +1266,8 @@ def show_post_history(call):
                     except:
                         user_name = "неизвестен"
 
-                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
+                # Создаем кликабельное имя пользователя
+                user_display = f"<a href='tg://user?id={user_id}'>{escape_html(user_name)}</a> (ID: <code>{user_id}</code>)"
                 network = escape_html(network)
                 city = escape_html(city)
                 chat_id_short = str(chat_id).replace("-100", "")
@@ -1385,11 +1386,20 @@ def handle_duration_change(call):
         print(f"Ошибка в handle_duration_change: {e}")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка при изменении срока.")
 
+def clear_old_stats():
+    """Очищает статистику старше суток."""
+    now = datetime.now()
+    for user_id, posts in user_posts.items():
+        user_posts[user_id] = [post for post in posts if now - post["time"] < timedelta(days=1)]
+
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
     if not is_admin(chat_id):
         bot.send_message(chat_id, "⛔ У вас нет прав для просмотра статистики.")
         return
+
+    # Очистка старой статистики
+    clear_old_stats()
 
     stats = get_admin_statistics()
     if not stats:
@@ -1403,7 +1413,8 @@ def show_statistics_for_admin(chat_id):
             user_info = bot.get_chat(user_id)
             user_name = escape_html(user_info.first_name)
             user_link = f"<a href='https://t.me/{user_info.username}'>{user_name}</a>" if user_info.username else f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
-        except:
+        except Exception as e:
+            print(f"DEBUG: Ошибка получения данных пользователя {user_id}: {e}")
             user_link = f"ID <code>{user_id}</code>"
 
         response += (
@@ -1415,20 +1426,29 @@ def show_statistics_for_admin(chat_id):
         if user_stats["details"]:
             response += "🧾 <b>Детали по сетям и городам:</b>\n"
             for network, cities in user_stats["details"].items():
-                net_key = normalize_network_key(network)
+                net_key = normalize_work_key(network)
                 for city, data in cities.items():
                     expire_str = "(неизвестно)"
                     for paid in paid_users.get(user_id, []):
+                        print(f"DEBUG: Проверка записи оплаты для user_id={user_id}: network={paid.get('network')}, city={paid.get('city')}")
                         if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
                             end_date = paid.get("end_date")
                             if isinstance(end_date, str):
                                 try:
                                     end_date = datetime.fromisoformat(end_date)
-                                except:
+                                except ValueError:
+                                    print(f"DEBUG: Ошибка преобразования end_date: {end_date}")
                                     end_date = None
                             if isinstance(end_date, datetime):
-                                expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
+                                if end_date >= datetime.now():
+                                    expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
+                                    print(f"DEBUG: Найден срок для {network}, {city}: {expire_str}")
+                                else:
+                                    print(f"DEBUG: Срок истёк для {network}, {city}")
+                                    expire_str = "(срок истёк)"
                             break
+                    else:
+                        print(f"DEBUG: Запись оплаты для {network}, {city} не найдена для user_id={user_id}")
 
                     location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
                     location_str = ", ".join(location_names) if location_names else city
@@ -1720,10 +1740,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     # Создание user_name
-    if username_link:
-        user_name = f'<b><a href="https://t.me/{username_link}">{display_name}</a></b>'
-    else:
-        user_name = f'<b>{display_name}</b>'
+    user_name = f'<b><a href="tg://user?id={user_id}">{display_name}</a></b>'
 
     was_published = False
 
@@ -1748,11 +1765,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         signature = escape_html(network_signatures.get(network, ""))
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # Кнопка "Написать", если нет username
+        # Кнопка "Написать" больше не нужна, так как имя уже кликабельное
         reply_markup = None
-        if not username_link:
-            reply_markup = types.InlineKeyboardMarkup()
-            reply_markup.add(types.InlineKeyboardButton("✉️ Написать", url=f"tg://user?id={user_id}"))
 
         for location in city_data:
             chat_id = location["chat_id"]
