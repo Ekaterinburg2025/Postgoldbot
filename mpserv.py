@@ -7,6 +7,7 @@ from collections import defaultdict
 import threading
 import shutil
 import re
+import html
 from urllib.parse import quote
 
 import pytz
@@ -21,24 +22,13 @@ from telebot.apihelper import ApiTelegramException
 
 from flask import Flask, request, Response
 
-import re
-
-def escape_md(text):
+def escape_html(text):
     """
-    Экранирует спецсимволы MarkdownV2, но оставляет пробелы, точки, запятые и эмодзи без изменений.
-    Возвращает пустую строку, если текст состоит только из пробелов или пуст.
+    Экранирует спецсимволы для HTML.
     """
     if not isinstance(text, str):
         text = str(text)
-    
-    # Если текст пустой или состоит только из пробелов
-    if not text.strip():
-        return ""
-    
-    # Экранируем только спецсимволы MarkdownV2 (точка и запятая не экранируются)
-    text = re.sub(r'([_*\[\]()~`>#+\-=|{}\!\\])', r'\\\1', text)
-    
-    return text
+    return html.escape(text)
 
 # Получаем токен из переменной окружения
 TOKEN = os.getenv('BOT_TOKEN')
@@ -1109,6 +1099,8 @@ def handle_admin_callback(call):
         elif call.data == "admin_delete_user_posts":
             bot.send_message(call.message.chat.id, "🆔 Введите ID пользователя, чьи объявления нужно удалить:")
             bot.register_next_step_handler(call.message, delete_user_posts_step)
+        elif call.data == "admin_post_history":  # 👈 ЭТО ДОБАВЬ
+            show_post_history(call)              # 👈 И ЭТО
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_callback: {e}")
 
@@ -1200,19 +1192,14 @@ def show_failed_attempts(call):
             bot.answer_callback_query(call.id, "✅ Нет попыток без доступа.")
             return
 
-        response = "📛 *Попытки публикации без доступа:*\n\n"
+        response = "<b>📛 Попытки публикации без доступа:</b>\n\n"
         for user_id, network, city, time_str, reason in attempts:
             try:
                 user = bot.get_chat(user_id)
-                name = get_user_name(user)
-                escaped_name = escape_md(name)
-                if user.username and re.match(r"^[A-Za-z0-9_]{5,}$", user.username):
-                    # Формируем ссылку без экранирования внутри URL
-                    user_link = f"[{escaped_name}](https://t.me/{user.username})"
-                else:
-                    user_link = f"*{escaped_name}*"
+                name = escape_html(user.first_name)
+                user_link = f"<a href='https://t.me/{user.username}'>{name}</a>" if user.username else f"<a href='tg://user?id={user.id}'>{name}</a>"
             except:
-                user_link = f"ID: `{user_id}`"
+                user_link = f"ID: <code>{user_id}</code>"
 
             try:
                 time = datetime.fromisoformat(time_str)
@@ -1220,31 +1207,19 @@ def show_failed_attempts(call):
             except:
                 time_formatted = "неизвестно"
 
-            # Экранируем только текст, не ссылки и даты
-            network = escape_md(network)
-            city = escape_md(city)
-            reason = escape_md(reason)
-
             response += (
                 f"👤 {user_link}\n"
-                f"🌐 Сеть: *{network}*, Город: *{city}*\n"
+                f"🌐 Сеть: <b>{escape_html(network)}</b>, Город: <b>{escape_html(city)}</b>\n"
                 f"🕐 {time_formatted}\n"
-                f"❌ Причина: _{reason}_\n\n"
+                f"❌ Причина: <i>{escape_html(reason)}</i>\n\n"
             )
 
-        # Логирование перед отправкой
-        print(f"Отправляемое сообщение: {response}")
-        bot.send_message(call.message.chat.id, response, parse_mode="MarkdownV2")
+        bot.send_message(call.message.chat.id, response, parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     except Exception as e:
-        # Логирование ошибки
         print(f"Ошибка: {e}")
-        bot.send_message(
-            call.message.chat.id,
-            f"❌ Ошибка при получении попыток: {escape_md(str(e))}",
-            parse_mode="MarkdownV2"
-        )
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
@@ -1269,37 +1244,34 @@ def show_post_history(call):
             bot.send_message(call.message.chat.id, "История постов пуста.")
             return
 
-        report = "📜 *История публикаций:*\n\n"
+        report = "<b>📜 История публикаций:</b>\n\n"
         for post in posts:
             try:
                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
                 time = datetime.fromisoformat(time_str)
                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
 
-                user_display = f"{escape_md(user_name)} (ID: `{user_id}`)" if user_name else f"ID: `{user_id}`"
-                network = escape_md(network)
-                city = escape_md(city)
-                deleted_by = escape_md(str(deleted_by)) if deleted else ""
+                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)" if user_name else f"ID: <code>{user_id}</code>"
+                network = escape_html(network)
+                city = escape_html(city)
+                deleted_by = escape_html(str(deleted_by)) if deleted_by else "-"
                 chat_id_short = str(chat_id).replace("-100", "")
 
-                report += f"👤 *Юзер:* {user_display}\n"
-                report += f"🌐 *Сеть/Группа:* {network} ({city})\n"
-                report += f"🕒 *Время:* {formatted_time}\n"
-                if deleted:
-                    report += f"❌ *Удалён:* Да (Кем: {deleted_by})\n"
-                else:
-                    report += f"✅ *Статус:* Активен\n"
-                report += f"🔗 *Ссылка:* [Перейти к посту](https://t.me/c/{chat_id_short}/{message_id})\n\n"
+                report += f"👤 <b>Юзер:</b> {user_display}\n"
+                report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                report += f"🕒 <b>Время:</b> {formatted_time}\n"
+                report += f"{'❌ <b>Удалён:</b> Да (кем: ' + deleted_by + ')' if deleted else '✅ <b>Статус:</b> Активен'}\n"
+                report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
 
             except Exception as inner_e:
                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
-                report += f"⚠️ Ошибка в записи: {escape_md(str(inner_e))}\n\n"
+                report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
 
-        bot.send_message(call.message.chat.id, report, parse_mode="MarkdownV2")
+        bot.send_message(call.message.chat.id, report, parse_mode="HTML")
 
     except Exception as e:
         print(f"[ERROR] История постов: {e}")
-        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: {escape_md(str(e))}", parse_mode="MarkdownV2")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
 # Функция для добавления администратора
 def add_admin_step(message):
@@ -1396,34 +1368,30 @@ def show_statistics_for_admin(chat_id):
         bot.send_message(chat_id, "ℹ️ Нет данных о публикациях.")
         return
 
-    response = "📊 *Статистика публикаций:*\n\n"
+    response = "<b>📊 Статистика публикаций:</b>\n\n"
 
     for user_id, user_stats in stats.items():
         try:
             user_info = bot.get_chat(user_id)
-            user_name = get_user_name(user_info)
-            user_link = f"[{escape_md(user_name)}](https://t.me/{user_info.username})" if user_info.username else escape_md(user_name)
+            user_name = escape_html(user_info.first_name)
+            user_link = f"<a href='https://t.me/{user_info.username}'>{user_name}</a>" if user_info.username else f"<a href='tg://user?id={user_info.id}'>{user_name}</a>"
         except:
-            user_link = f"ID `{user_id}`"
+            user_link = f"ID <code>{user_id}</code>"
 
         response += (
             f"👤 {user_link}\n"
-            f"📨 Опубликовано: *{user_stats['published']}*\n"
-            f"📉 Осталось: *{user_stats['remaining']}*\n"
+            f"📨 Опубликовано: <b>{user_stats['published']}</b>\n"
+            f"📉 Осталось: <b>{user_stats['remaining']}</b>\n"
         )
 
         if user_stats["details"]:
-            response += "🧾 *Детали по сетям и городам:*\n"
+            response += "🧾 <b>Детали по сетям и городам:</b>\n"
             for network, cities in user_stats["details"].items():
                 net_key = normalize_network_key(network)
                 for city, data in cities.items():
-                    # 🗓 Поиск даты окончания доступа
                     expire_str = "(неизвестно)"
                     for paid in paid_users.get(user_id, []):
-                        if (
-                            normalize_network_key(paid.get("network")) == net_key and
-                            paid.get("city") == city
-                        ):
+                        if normalize_network_key(paid.get("network")) == net_key and paid.get("city") == city:
                             end_date = paid.get("end_date")
                             if isinstance(end_date, str):
                                 try:
@@ -1434,27 +1402,27 @@ def show_statistics_for_admin(chat_id):
                                 expire_str = f"⏳ до {end_date.strftime('%d.%m.%Y')}"
                             break
 
-                    # 🏙 Названия всех связанных групп
                     location_names = [loc["name"] for loc in all_cities.get(city, {}).get(net_key, [])]
                     location_str = ", ".join(location_names) if location_names else city
 
                     response += (
-                        f"  └ 🧩 *{escape_md(network)}*, 📍*{escape_md(city)}* → {escape_md(location_str)} {expire_str}: "
-                        f"*{data['published']} / {data['remaining']}*\n"
+                        f"  └ 🧩 <b>{escape_html(network)}</b>, 📍<b>{escape_html(city)}</b> → "
+                        f"{escape_html(location_str)} {expire_str}: "
+                        f"<b>{data['published']} / {data['remaining']}</b>\n"
                     )
 
         if user_stats["links"]:
             unique_links = list(set(user_stats["links"]))
-            response += "🔗 *Ссылки на публикации:*\n"
+            response += "🔗 <b>Ссылки на публикации:</b>\n"
             for link in unique_links:
-                response += f"  • {escape_md(link)}\n"
+                response += f"  • <a href='{link}'>{link}</a>\n"
 
         response += "\n"
 
     try:
-        bot.send_message(chat_id, response, parse_mode="Markdown")
+        bot.send_message(chat_id, response, parse_mode="HTML")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: {escape_md(str(e))}", parse_mode="Markdown")
+        bot.send_message(chat_id, f"❌ Ошибка при отправке статистики: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
 # Функция для изменения срока оплаты
 def select_user_for_duration_change(message):
@@ -1714,7 +1682,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
     user_id = message.from_user.id
     user_name = get_user_name(message.from_user)
-    networks = ["Мужской Клуб", "Парни 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
 
@@ -1725,12 +1693,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         if not city_data:
             continue
 
-        # 🔒 Проверка оплаты
         if not is_user_paid(user_id, network, city):
             log_failed_attempt(user_id, network, city, "Нет доступа")
             continue
 
-        # ⛔ Проверка лимита
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
@@ -1738,7 +1704,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        # ✅ Публикация
         signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
@@ -1752,19 +1717,20 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="MarkdownV2")
 
-                # ✅ Сохраняем в user_posts (добавили user_name!)
+                # ✅ Добавляем в user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
+
                 user_posts[user_id].append({
                     "message_id": sent_message.message_id,
                     "chat_id": chat_id,
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": user_name  # 🆕 обязательно!
+                    "user_name": user_name
                 })
 
-                # ✅ Добавляем в post_history
+                # ✅ Добавляем в историю
                 add_post_to_history(
                     user_id=user_id,
                     user_name=user_name,
@@ -1773,7 +1739,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     chat_id=chat_id,
                     message_id=sent_message.message_id
                 )
-                print(f"[DEBUG] Пост сохранён в историю: {user_name} / {network} / {location['name']}")
 
                 # ✅ Обновляем лимиты
                 if user_id not in user_daily_posts:
@@ -1798,7 +1763,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQMKBOT"))
         else:
             markup.add(types.InlineKeyboardButton("Купить рекламу", url="https://t.me/FAQZNAKBOT"))
-        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору для оплаты.", reply_markup=markup)
+        bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.", reply_markup=markup)
 
     # 💾 Сохраняем даже при отсутствии публикации (важны попытки!)
     save_data()
