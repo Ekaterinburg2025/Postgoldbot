@@ -879,7 +879,7 @@ def save_data(retries=3, delay=0.5):
                     bot.send_message(
                         ADMIN_CHAT_ID,
                         f"✅ *Сохранено в базу:*\n👤 Оплативших: *{len(paid_users)}*\n📬 Постов: *{len(user_posts)}*\n👮 Админов: *{len(admins)}*",
-                        parse_mode="MarkdownV2"
+                        parse_mode="Markdown"
                     )
                     return
 
@@ -1861,7 +1861,7 @@ def handle_stats_button(message):
                         f"     • Опубликовано: *{data['published']}*, Осталось: *{data['remaining']}*\n"
                     )
 
-        bot.send_message(message.chat.id, response, parse_mode="MarkdownV2")
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Произошла ошибка при получении статистики: {e}")
@@ -1885,7 +1885,7 @@ def delete_user_posts_step(message):
         markup.add(types.InlineKeyboardButton("✅ Удалить все", callback_data=f"confirm_delete_{user_id}"))
         markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_delete"))
 
-        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="MarkdownV2")
+        bot.send_message(message.chat.id, preview, reply_markup=markup, parse_mode="Markdown")
 
     except ValueError:
         bot.send_message(message.chat.id, "❌ Введите корректный числовой ID.")
@@ -1915,7 +1915,7 @@ def handle_delete_confirmation(call):
         f"✅ Удалено {deleted} объявлений пользователя ID: `{user_id}`.",
         call.message.chat.id,
         call.message.message_id,
-        parse_mode="MarkdownV2"
+        parse_mode="Markdown"
     )
 
 @app.route('/webhook', methods=['POST'])
