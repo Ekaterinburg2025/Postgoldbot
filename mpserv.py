@@ -13,7 +13,7 @@ from urllib.parse import quote
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 ATTEMPTS_PER_PAGE = 10
-POSTS_PER_PAGE = 5
+POSTS_PER_PAGE = 10
 
 import pytz
 from pytz import timezone
@@ -1096,7 +1096,7 @@ def admin_panel(message):
     markup.add(types.InlineKeyboardButton("👑 Добавить администратора", callback_data="admin_add_admin"))
     markup.add(types.InlineKeyboardButton("📊 Статистика публикаций", callback_data="admin_statistics"))
     markup.add(types.InlineKeyboardButton("📛 Попытки без доступа", callback_data="show_failed_attempts:0"))
-    markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history:0"))
+    markup.add(types.InlineKeyboardButton("🗂 История постов", callback_data="admin_post_history"))
     markup.add(types.InlineKeyboardButton("🗑 Удалить объявления пользователя", callback_data="admin_delete_user_posts"))
 
     bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
@@ -1266,84 +1266,70 @@ def show_failed_attempts(call):
         bot.send_message(call.message.chat.id, f"❌ Ошибка при получении попыток: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_post_history"))
-def show_post_history_page(call):
-    try:
-        # Разбираем номер страницы
-        parts = call.data.split(":")
-        page = int(parts[1]) if len(parts) > 1 else 0
-        offset = page * POSTS_PER_PAGE
-
-        with db_lock:
-            with sqlite3.connect("bot_data.db") as conn:
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM post_history")
-                total_count = cur.fetchone()[0]
-
-                cur.execute("""
-                    SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
-                    FROM post_history
-                    ORDER BY time DESC
-                    LIMIT ? OFFSET ?
-                """, (POSTS_PER_PAGE, offset))
-                posts = cur.fetchall()
-
-        if not posts:
-            bot.answer_callback_query(call.id, "История пуста.")
-            return
-
-        total_pages = (total_count - 1) // POSTS_PER_PAGE + 1
-        report = f"<b>📜 История публикаций (стр. {page + 1} из {total_pages}):</b>\n\n"
-
-        for post in posts:
-            try:
-                user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
-                time = datetime.fromisoformat(time_str)
-                formatted_time = time.strftime('%d.%m.%Y %H:%M')
-
-                if not user_name or user_name.lower() == "неизвестен":
-                    try:
-                        user_info = bot.get_chat(user_id)
-                        user_name = user_info.first_name or "неизвестен"
-                    except:
-                        user_name = "неизвестен"
-
-                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
-                network = escape_html(network)
-                city = escape_html(city)
-                chat_id_short = str(chat_id).replace("-100", "")
-
-                status_line = (
-                    f"❌ <b>Удалён:</b> Да (кем: {escape_html(str(deleted_by))})"
-                    if deleted else "✅ <b>Статус:</b> Активен"
-                )
-
-                report += (
-                    f"👤 <b>Юзер:</b> {user_display}\n"
-                    f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
-                    f"🕒 <b>Время:</b> {formatted_time}\n"
-                    f"{status_line}\n"
-                    f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
-                )
-            except Exception as inner_e:
-                report += f"⚠️ Ошибка: <code>{escape_html(str(inner_e))}</code>\n\n"
-
-        # Кнопки пагинации
-        keyboard = InlineKeyboardMarkup()
-        buttons = []
-        if page > 0:
-            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_post_history:{page - 1}"))
-        if offset + POSTS_PER_PAGE < total_count:
-            buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"admin_post_history:{page + 1}"))
-        if buttons:
-            keyboard.row(*buttons)
-
-        bot.edit_message_text(report, chat_id=call.message.chat.id, message_id=call.message.message_id,
-                              parse_mode="HTML", reply_markup=keyboard)
-
-    except Exception as e:
-        print(f"[ERROR] История постов: {e}")
-        bot.send_message(call.message.chat.id, f"❌ Ошибка: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
+@bot.callback_query_handler(func=lambda call: call.data == "admin_post_history")
+def show_post_history(call):
+     try:
+         print("[DEBUG] Нажата кнопка истории постов")
+ 
+         with db_lock:
+             with sqlite3.connect("bot_data.db") as conn:
+                 cur = conn.cursor()
+                 cur.execute("""
+                     SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
+                     FROM post_history
+                     ORDER BY time DESC
+                     LIMIT 100
+                 """)
+                 posts = cur.fetchall()
+ 
+         print(f"[DEBUG] Загружено постов из истории: {len(posts)}")
+ 
+         if not posts:
+             bot.send_message(call.message.chat.id, "История постов пуста.")
+             return
+ 
+         report = "<b>📜 История публикаций:</b>\n\n"
+         for post in posts:
+             try:
+                 user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+                 time = datetime.fromisoformat(time_str)
+                 formatted_time = time.strftime('%d.%m.%Y %H:%M')
+ 
+                 # 🔍 Попытка вытянуть имя, если неизвестно
+                 if not user_name or user_name.lower() == "неизвестен":
+                     try:
+                         user_info = bot.get_chat(user_id)
+                         user_name = user_info.first_name or "неизвестен"
+                     except:
+                         user_name = "неизвестен"
+ 
+                 user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
+                 network = escape_html(network)
+                 city = escape_html(city)
+                 chat_id_short = str(chat_id).replace("-100", "")
+ 
+                 # 🗑 Обработка статуса удаления
+                 if deleted:
+                     deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
+                     status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
+                 else:
+                     status_line = "✅ <b>Статус:</b> Активен"
+ 
+                 report += f"👤 <b>Юзер:</b> {user_display}\n"
+                 report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                 report += f"🕒 <b>Время:</b> {formatted_time}\n"
+                 report += f"{status_line}\n"
+                 report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
+ 
+             except Exception as inner_e:
+                 print(f"[ERROR] Ошибка в записи истории: {inner_e}")
+                 report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
+ 
+         bot.send_message(call.message.chat.id, report, parse_mode="HTML")
+ 
+     except Exception as e:
+         print(f"[ERROR] История постов: {e}")
+         bot.send_message(call.message.chat.id, f"❌ Ошибка при отображении истории: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
  
 # Функция для добавления администратора
 def add_admin_step(message):
@@ -1365,18 +1351,18 @@ def show_paid_users(message):
     for user_id, entries in paid_users.items():
         try:
             user_info = bot.get_chat(user_id)
-            name = escape_html(user_info.first_name or "Без имени")
+            name = escape_html(user_info.first_name or "")
             username = user_info.username
-
             id_link = f"<a href='tg://user?id={user_id}'>{user_id}</a>"
-            name_link = f"<a href='tg://user?id={user_id}'>{name}</a>"
 
             if username:
-                user_line = f"👤 <b>Пользователь:</b> {id_link} | {name_link} (@{username})"
+                full_name = f"{name} (@{username})"
             else:
-                user_line = f"👤 <b>Пользователь:</b> {id_link} | {name_link}"
+                full_name = f"{name}"
+
+            user_line = f"👤 <b>Пользователь:</b> {id_link} | {full_name}"
         except Exception:
-            user_line = f"👤 <b>Пользователь:</b> <a href='tg://user?id={user_id}'>{user_id}</a>"
+            user_line = f"👤 <b>Пользователь:</b> <code>{user_id}</code>"
 
         response += f"\n{user_line}\n"
 
@@ -1762,10 +1748,6 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
-def get_user_link(user):
-    first_name = escape_html(user.first_name or "Пользователь")
-    return f'<b><a href="tg://user?id={user.id}">{first_name}</a></b>'
-
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1779,10 +1761,13 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_link = get_user_link(message.from_user)
+    display_name = escape_html(get_user_name(message.from_user))
     text = escape_html(text)
-
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+
+    # Создаем жирное и кликабельное имя пользователя, используя tg://user?id={user_id}
+    user_name = f'<b><a href="tg://user?id={user_id}">{display_name}</a></b>'
+
     was_published = False
 
     for network in networks:
@@ -1804,8 +1789,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             continue
 
         signature = escape_html(network_signatures.get(network, ""))
-        full_text = f"📢 Объявление от {user_link}:\n\n{text}\n\n{signature}"
-        reply_markup = None  # убрали кнопку
+        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+
+        # Кнопка "Написать" больше не нужна, так как имя уже кликабельное
+        reply_markup = None
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1817,6 +1804,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
+                # ✅ Добавляем в user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
 
@@ -1826,18 +1814,20 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": message.from_user.first_name  # только имя, без ссылки в базе
+                    "user_name": display_name
                 })
 
+                # ✅ Добавляем в post_history
                 add_post_to_history(
                     user_id=user_id,
-                    user_name=message.from_user.first_name,
+                    user_name=display_name,
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
                     message_id=sent_message.message_id
                 )
 
+                # ✅ Обновляем лимиты
                 if user_id not in user_daily_posts:
                     user_daily_posts[user_id] = {}
                 if network not in user_daily_posts[user_id]:
