@@ -1762,6 +1762,10 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
+def get_user_link(user):
+    first_name = escape_html(user.first_name or "Пользователь")
+    return f'<b><a href="tg://user?id={user.id}">{first_name}</a></b>'
+
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1775,9 +1779,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-
-    # 📌 Формируем правильную ссылку на пользователя
-    user_link = f'<b><a href="tg://user?id={user_id}">{escape_html(message.from_user.first_name or "Пользователь")}</a></b>'
+    user_link = get_user_link(message.from_user)
     text = escape_html(text)
 
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
@@ -1803,7 +1805,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         signature = escape_html(network_signatures.get(network, ""))
         full_text = f"📢 Объявление от {user_link}:\n\n{text}\n\n{signature}"
-        reply_markup = None
+        reply_markup = None  # убрали кнопку
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1824,12 +1826,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": escape_html(message.from_user.first_name or "Пользователь")
+                    "user_name": message.from_user.first_name  # только имя, без ссылки в базе
                 })
 
                 add_post_to_history(
                     user_id=user_id,
-                    user_name=escape_html(message.from_user.first_name or "Пользователь"),
+                    user_name=message.from_user.first_name,
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
