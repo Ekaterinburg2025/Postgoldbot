@@ -13,7 +13,7 @@ from urllib.parse import quote
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 ATTEMPTS_PER_PAGE = 10
-POSTS_PER_PAGE = 10
+POSTS_PER_PAGE = 5
 
 import pytz
 from pytz import timezone
@@ -1775,8 +1775,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = escape_html(message.from_user.first_name or "Пользователь")
-    user_link = f'<b><a href="tg://user?id={user_id}">{user_name}</a></b>'
+
+    # 📌 Формируем правильную ссылку на пользователя
+    user_link = f'<b><a href="tg://user?id={user_id}">{escape_html(message.from_user.first_name or "Пользователь")}</a></b>'
     text = escape_html(text)
 
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
@@ -1802,7 +1803,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         signature = escape_html(network_signatures.get(network, ""))
         full_text = f"📢 Объявление от {user_link}:\n\n{text}\n\n{signature}"
-        reply_markup = None  # убрали кнопку, имя уже кликабельное
+        reply_markup = None
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1823,12 +1824,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": user_name
+                    "user_name": escape_html(message.from_user.first_name or "Пользователь")
                 })
 
                 add_post_to_history(
                     user_id=user_id,
-                    user_name=user_name,
+                    user_name=escape_html(message.from_user.first_name or "Пользователь"),
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
