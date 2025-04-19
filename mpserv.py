@@ -1269,10 +1269,97 @@ def show_failed_attempts(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_post_history:"))
 def show_post_history(call):
     try:
-        print("[DEBUG] Кнопка 'История постов' нажата.")  # Отладочное сообщение
-        bot.answer_callback_query(call.id, "Кнопка работает!")  # Ответим пользователю
+        print("[DEBUG] Callback data:", call.data)  # Отладочное сообщение
+
+        # Получаем номер страницы из callback_data
+        page = int(call.data.split(":")[1])
+        posts_per_page = 5  # Количество постов на страницу
+
+        with db_lock:
+            with sqlite3.connect("bot_data.db") as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT user_id, user_name, network, city, time, chat_id, message_id, deleted, deleted_by
+                    FROM post_history
+                    ORDER BY time DESC
+                """)
+                all_posts = cur.fetchall()
+
+        print(f"[DEBUG] Загружено постов из истории: {len(all_posts)}")  # Отладочное сообщение
+
+        if not all_posts:
+            bot.answer_callback_query(call.id, "История постов пуста.")
+            return
+
+        # Вычисляем общее количество страниц
+        total_pages = (len(all_posts) - 1) // posts_per_page + 1
+
+        # Получаем посты для текущей страницы
+        start = page * posts_per_page
+        end = start + posts_per_page
+        posts = all_posts[start:end]
+
+        report = f"<b>📜 История публикаций (стр. {page + 1} из {total_pages}):</b>\n\n"
+        for post in posts:
+            try:
+                user_id, user_name, network, city, time_str, chat_id, message_id, deleted, deleted_by = post
+                time = datetime.fromisoformat(time_str)
+                formatted_time = time.strftime('%d.%m.%Y %H:%M')
+
+                # 🔍 Попытка вытянуть имя, если неизвестно
+                if not user_name or user_name.lower() == "неизвестен":
+                    try:
+                        user_info = bot.get_chat(user_id)
+                        user_name = user_info.first_name or "неизвестен"
+                    except:
+                        user_name = "неизвестен"
+
+                user_display = f"{escape_html(user_name)} (ID: <code>{user_id}</code>)"
+                network = escape_html(network)
+                city = escape_html(city)
+                chat_id_short = str(chat_id).replace("-100", "")
+
+                # 🗑 Обработка статуса удаления
+                if deleted:
+                    deleted_by_display = escape_html(str(deleted_by)) if deleted_by else "неизвестно"
+                    status_line = f"❌ <b>Удалён:</b> Да (кем: {deleted_by_display})"
+                else:
+                    status_line = "✅ <b>Статус:</b> Активен"
+
+                report += f"👤 <b>Юзер:</b> {user_display}\n"
+                report += f"🌐 <b>Сеть/Группа:</b> {network} ({city})\n"
+                report += f"🕒 <b>Время:</b> {formatted_time}\n"
+                report += f"{status_line}\n"
+                report += f"🔗 <a href='https://t.me/c/{chat_id_short}/{message_id}'>Перейти к посту</a>\n\n"
+
+            except Exception as inner_e:
+                print(f"[ERROR] Ошибка в записи истории: {inner_e}")
+                report += f"⚠️ Ошибка в записи: <code>{escape_html(str(inner_e))}</code>\n\n"
+
+        # Создаем клавиатуру с кнопками "Назад" и "Вперёд"
+        keyboard = types.InlineKeyboardMarkup()
+        buttons = []
+
+        if page > 0:
+            buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_post_history:{page - 1}"))
+        if end < len(all_posts):
+            buttons.append(types.InlineKeyboardButton("Вперёд ➡️", callback_data=f"admin_post_history:{page + 1}"))
+
+        if buttons:
+            keyboard.row(*buttons)
+
+        # Отправляем сообщение с пагинацией
+        bot.edit_message_text(
+            report,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
     except Exception as e:
-        print(f"[ERROR] Ошибка в обработчике: {e}")
+        print(f"[ERROR] История постов: {e}")  # Отладочное сообщение
+        bot.answer_callback_query(call.id, "Ошибка при обработке запроса.")
  
 # Функция для добавления администратора
 def add_admin_step(message):
