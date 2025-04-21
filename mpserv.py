@@ -1781,6 +1781,12 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
+def get_user_html_link(user):
+    name = html.escape(user.first_name or "Без имени")
+    if user.last_name:
+        name += " " + html.escape(user.last_name)
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
+
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1794,12 +1800,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    display_name = escape_html(get_user_name(message.from_user))
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
     text = escape_html(text)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
-
-    # Создаем жирное и кликабельное имя пользователя, используя tg://user?id={user_id}
-    user_name = f'<b><a href="tg://user?id={user_id}">{display_name}</a></b>'
 
     was_published = False
 
@@ -1817,15 +1820,20 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
         if city_stats.get("remaining", 0) <= 0:
-            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для <b>{escape_html(network)}</b>, город <b>{escape_html(city)}</b>", parse_mode="HTML")
+            bot.send_message(
+                message.chat.id,
+                f"⛔ Лимит публикаций исчерпан для <b>{escape_html(network)}</b>, город <b>{escape_html(city)}</b>",
+                parse_mode="HTML"
+            )
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
         signature = escape_html(network_signatures.get(network, ""))
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # Кнопка "Написать" больше не нужна, так как имя уже кликабельное
-        reply_markup = None
+        # 💬 Добавим кнопку "Напиши мне в ЛС"
+        reply_markup = types.InlineKeyboardMarkup()
+        reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1837,7 +1845,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
-                # ✅ Добавляем в user_posts
                 if user_id not in user_posts:
                     user_posts[user_id] = []
 
@@ -1847,28 +1854,22 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": display_name
+                    "user_name": get_user_html_link(message.from_user)
                 })
 
-                # ✅ Добавляем в post_history
                 add_post_to_history(
                     user_id=user_id,
-                    user_name=display_name,
+                    user_name=get_user_html_link(message.from_user),
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
                     message_id=sent_message.message_id
                 )
 
-                # ✅ Обновляем лимиты
-                if user_id not in user_daily_posts:
-                    user_daily_posts[user_id] = {}
-                if network not in user_daily_posts[user_id]:
-                    user_daily_posts[user_id][network] = {}
-                if city not in user_daily_posts[user_id][network]:
-                    user_daily_posts[user_id][network][city] = {"posts": [], "deleted_posts": []}
-
-                user_daily_posts[user_id][network][city]["posts"].append(now_ekb())
+                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {
+                    "posts": [],
+                    "deleted_posts": []
+                })["posts"].append(now_ekb())
 
                 bot.send_message(
                     message.chat.id,
