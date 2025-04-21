@@ -1101,31 +1101,6 @@ def admin_panel(message):
 
     bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
 
-# Обработчик callback-запросов админ-панели
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
-def handle_admin_callback(call):
-    try:
-        if call.data == "admin_add_paid_user":
-            bot.send_message(call.message.chat.id, "Введите ID пользователя:")
-            bot.register_next_step_handler(call.message, process_user_id_for_payment)
-        elif call.data == "admin_list_paid_users":
-            show_paid_users(call.message)
-        elif call.data == "admin_change_duration":
-            bot.send_message(call.message.chat.id, "Введите ID пользователя для изменения срока:")
-            bot.register_next_step_handler(call.message, select_user_for_duration_change)
-        elif call.data == "admin_add_admin":
-            bot.send_message(call.message.chat.id, "Введите ID нового администратора:")
-            bot.register_next_step_handler(call.message, add_admin_step)
-        elif call.data == "admin_statistics":
-            show_statistics_for_admin(call.message.chat.id)
-        elif call.data == "admin_delete_user_posts":
-            bot.send_message(call.message.chat.id, "🆔 Введите ID пользователя, чьи объявления нужно удалить:")
-            bot.register_next_step_handler(call.message, delete_user_posts_step)
-        elif call.data == "admin_post_history":  # 👈 ЭТО ДОБАВЬ
-            show_post_history(call)              # 👈 И ЭТО
-    except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка в admin_callback: {e}")
-
 # Функция для добавления оплатившего
 def process_user_id_for_payment(message):
     try:
