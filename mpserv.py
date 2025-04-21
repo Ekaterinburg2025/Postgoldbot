@@ -1800,7 +1800,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
     text = escape_html(text)
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
@@ -1831,7 +1831,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         signature = escape_html(network_signatures.get(network, ""))
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # 💬 Добавим кнопку "Напиши мне в ЛС"
+        # 💬 Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
@@ -1845,10 +1845,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
-                if user_id not in user_posts:
-                    user_posts[user_id] = []
-
-                user_posts[user_id].append({
+                user_posts.setdefault(user_id, []).append({
                     "message_id": sent_message.message_id,
                     "chat_id": chat_id,
                     "time": now_ekb(),
