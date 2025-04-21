@@ -1101,6 +1101,34 @@ def admin_panel(message):
 
     bot.send_message(message.chat.id, "🛠 *Админ-панель:*", reply_markup=markup, parse_mode="Markdown")
 
+@bot.callback_query_handler(func=lambda call: call.data == "admin_add_paid_user")
+def handle_add_paid_user(call):
+    bot.send_message(call.message.chat.id, "Введите ID пользователя:")
+    bot.register_next_step_handler(call.message, process_user_id_for_payment)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_list_paid_users")
+def handle_list_paid_users(call):
+    show_paid_users(call.message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_change_duration")
+def handle_change_duration_request(call):
+    bot.send_message(call.message.chat.id, "Введите ID пользователя для изменения срока:")
+    bot.register_next_step_handler(call.message, select_user_for_duration_change)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_add_admin")
+def handle_add_admin_request(call):
+    bot.send_message(call.message.chat.id, "Введите ID нового администратора:")
+    bot.register_next_step_handler(call.message, add_admin_step)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
+def handle_admin_statistics(call):
+    show_statistics_for_admin(call.message.chat.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_delete_user_posts")
+def handle_admin_delete_user_posts(call):
+    bot.send_message(call.message.chat.id, "🆔 Введите ID пользователя, чьи объявления нужно удалить:")
+    bot.register_next_step_handler(call.message, delete_user_posts_step)
+
 # Функция для добавления оплатившего
 def process_user_id_for_payment(message):
     try:
