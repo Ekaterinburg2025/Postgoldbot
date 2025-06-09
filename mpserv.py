@@ -1812,7 +1812,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
     user_id = message.from_user.id
     user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
-    text = escape_html(text)
+    text = escape_html(text)  # Экранируем пользовательский текст
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
@@ -1839,7 +1839,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = escape_html(network_signatures.get(network, ""))
+        signature = network_signatures.get(network, "")  # Без escape_html
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
         # 💬 Кнопка "Напиши мне в ЛС"
