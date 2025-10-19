@@ -1865,7 +1865,11 @@ def select_network(message, text, media_type, file_id):
             reply_markup=markup,
             parse_mode="HTML"
         )
-        bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
+        # Используем lambda для передачи всех параметров
+        bot.register_next_step_handler(
+            message,
+            lambda m: select_city_and_publish(m, text, selected_network, media_type, file_id)
+        )
     else:
         bot.send_message(
             message.chat.id,
@@ -1874,37 +1878,36 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
+
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        bot.register_next_step_handler(
+            message,
+            lambda m: select_network(m, text, media_type, file_id)
+        )
         return
 
     city = message.text
     if city == "Выбрать другую сеть":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        bot.register_next_step_handler(
+            message,
+            lambda m: select_network(m, text, media_type, file_id)
+        )
         return
 
     user_id = message.from_user.id
     user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
     text = escape_html(text)
 
-    # Все сети теперь включают новые
-    if selected_network == "Все сети":
-        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"]
-    else:
-        networks = [selected_network]
-
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if selected_network == "Все сети" else [selected_network]
     was_published = False
 
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
-
         if not city_data:
-            print(f"[DEBUG] Нет данных чата для города '{city}', сети '{network}' (ключ '{net_key}')")
-            log_failed_attempt(user_id, network, city, "Нет чата для публикации")
             continue
 
         if not is_user_paid(user_id, network, city):
@@ -1956,10 +1959,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     message_id=sent_message.message_id
                 )
 
-                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {
-                    "posts": [],
-                    "deleted_posts": []
-                })["posts"].append(now_ekb())
+                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {"posts": [], "deleted_posts": []})["posts"].append(now_ekb())
 
                 bot.send_message(
                     message.chat.id,
@@ -1973,8 +1973,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
-        # Используем первую сеть из списка, если выбрано "Все сети"
-        first_network = networks[0] if networks else selected_network
         faq_links = {
             "Мужской Клуб": "https://t.me/FAQMKBOT",
             "Радуга": "https://t.me/FAQMKBOT",
@@ -1982,7 +1980,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             "ПАРНИ 18+": "https://t.me/FAQZNAKBOT",
             "НС": "https://t.me/FAQZNAKBOT"
         }
-        url = faq_links.get(first_network, "https://t.me/FAQZNAKBOT")
+        url = faq_links.get(selected_network, "https://t.me/FAQZNAKBOT")
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(
