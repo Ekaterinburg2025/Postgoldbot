@@ -18,6 +18,10 @@ POSTS_PER_PAGE = 10
 import pytz
 from pytz import timezone
 
+def schedule_daily_cleanup():
+    cleanup_expired_payments()
+    threading.Timer(24*60*60, schedule_daily_cleanup).start()
+
 def now_ekb():
     return datetime.now(timezone('Asia/Yekaterinburg'))
 # Убедись, что используешь одну временную зону для всех дат
@@ -403,6 +407,27 @@ chat_ids_ns = {
     "Знакомства 74": -1002193127380
 }
 
+# Новая сеть: Радуга (один общий чат)
+chat_ids_rainbow = {
+    "Екатеринбург": -1002419653224
+}
+
+# Новая сеть: ГЕЙ Знакомства (по городам)
+chat_ids_gayznak = {
+    "Красноярск": -1002335149925,
+    "Екатеринбург": -1002571605722,
+    "Пермь": -1002599206099,
+    "Тюмень": -1002553431228,
+    "Новосибирск": -1002627786446,
+    "Самара": -1002301984331,
+    "Казань": -1002277433049,
+    "Воронеж": -1002428155161,
+    "Кемерово": -1002418700136,
+    "Иркутск": -1002454522264,
+    "Москва": -1002255869134,
+    "Волгоград": -1002476113714
+}
+
 # Нормализация названий (объединение Перми/Пермь, ЯМАО/Ямал и пр.)
 def normalize_city_name(name):
     mapping = {
@@ -434,6 +459,14 @@ for city, chat_id in chat_ids_parni.items():
 for city, chat_id in chat_ids_ns.items():
     insert_to_all(city, "ns", city, chat_id)
 
+# Новая сеть: Радуга
+for city, chat_id in chat_ids_rainbow.items():
+    insert_to_all(city, "rainbow", city, chat_id)
+
+# Новая сеть: Гей Знакомства
+for city, chat_id in chat_ids_gayznak.items():
+    insert_to_all(city, "gayznak", city, chat_id)
+
 # Добавим fallback-группу МК для Тюмени, Ямала и ХМАО если её там нет
 fallback_mk = {"Тюмень", "Ямал", "ХМАО"}
 for city in fallback_mk:
@@ -458,6 +491,17 @@ network_signatures = {
     "НС": (
         "🟥🟦🟩🟨🟧🟪⬛️⬜️🟫\n\n"
         "<b>Администрация сети не рекомендует вносить какую-либо предоплату. Если ВАС обманули или развели, сообщите в бота поддержки!</b>\n"
+        "<i>Реклама. Не является публичной офертой.</i>"
+    ),
+    "Радуга": (
+        "Рекламная интеграция согласована с администратором.\n\n"
+        "Администрация не несёт ответственности за объявления пользователей.\n"
+        "Не вносите предоплату незнакомым лицам.\n"
+        "<i>Реклама. Не является публичной офертой.</i>"
+    ),
+    "Гей Знакомства": (
+        "Рекламная интеграция согласована с администратором.\n\n"
+        "Будьте осторожны при общении, не переводите деньги незнакомым людям.\n"
         "<i>Реклама. Не является публичной офертой.</i>"
     )
 }
@@ -619,6 +663,10 @@ def select_duration_for_payment(message, user_id, network, city):
             cities = list(chat_ids_parni.keys())
         elif network == "НС":
             cities = list(chat_ids_ns.keys())
+        elif network == "Радуга":
+            cities = list(chat_ids_rainbow.keys())
+        elif network == "Гей Знакомства":
+            cities = list(chat_ids_gayznak.keys())
         markup.add(*cities)
         markup.add("Назад")
         bot.send_message(message.chat.id, "📍 Выберите город для добавления пользователя:", reply_markup=markup)
@@ -785,8 +833,14 @@ def check_payment(user_id, network, city):
         print(f"[DEBUG] Пользователь {user_id} не найден в оплативших.")
         return False
 
-    # Получаем ключ сети
-    net_map = {"Мужской Клуб": "mk", "ПАРНИ 18+": "parni", "НС": "ns"}
+    # Получаем ключ сети, теперь с новыми сетями
+    net_map = {
+        "Мужской Клуб": "mk",
+        "ПАРНИ 18+": "parni",
+        "НС": "ns",
+        "Радуга": "rainbow",
+        "Гей Знакомства": "gayznak"
+    }
     net_key = net_map.get(network)
 
     for payment in paid_users[user_id]:
@@ -1161,7 +1215,7 @@ def select_network_for_payment(message, user_id):
         return
 
     network = message.text
-    if network not in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]:
+    if network not in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства", "Все сети"]:
         bot.send_message(message.chat.id, "❗ Ошибка! Выберите правильную сеть.")
         bot.register_next_step_handler(message, lambda m: select_network_for_payment(m, user_id))
         return
@@ -1745,17 +1799,29 @@ def handle_confirmation(message, text, media_type, file_id):
 
 def get_network_markup():
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети", "Назад")
+    markup.add(
+        "Мужской Клуб",
+        "ПАРНИ 18+",
+        "НС",
+        "Радуга",
+        "Гей Знакомства",
+        "Все сети",
+        "Назад"
+    )
     return markup
 
 def normalize_network_key(name):
-    """Приводим название сети к ключу all_cities: mk, parni, ns"""
+    """Приводим название сети к ключу all_cities: mk, parni, ns, rainbow, gayznak"""
     if name == "Мужской Клуб":
         return "mk"
     elif name == "ПАРНИ 18+":
         return "parni"
     elif name in ["НС", "Знакомства 66", "Знакомства 74"]:
         return "ns"
+    elif name == "Радуга":
+        return "rainbow"
+    elif name == "Гей Знакомства":
+        return "gayznak"
     return None
 
 def select_network(message, text, media_type, file_id):
@@ -1765,7 +1831,7 @@ def select_network(message, text, media_type, file_id):
         return
 
     selected_network = message.text.strip()
-    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Все сети"]
+    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства", "Все сети"]
 
     if selected_network in valid_networks:
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
@@ -1796,12 +1862,6 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
-def get_user_html_link(user):
-    name = html.escape(user.first_name or "Без имени")
-    if user.last_name:
-        name += " " + html.escape(user.last_name)
-    return f'<a href="tg://user?id={user.id}">{name}</a>'
-
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1815,9 +1875,14 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
-    text = escape_html(text)  # Экранируем пользовательский текст
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС"] if selected_network == "Все сети" else [selected_network]
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
+    text = escape_html(text)
+
+    # Все сети теперь включают новые
+    if selected_network == "Все сети":
+        networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"]
+    else:
+        networks = [selected_network]
 
     was_published = False
 
@@ -1843,10 +1908,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")  # Без escape_html
+        signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # 💬 Кнопка "Напиши мне в ЛС"
+        # Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
@@ -1895,8 +1960,15 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
+        faq_links = {
+            "Мужской Клуб": "https://t.me/FAQMKBOT",
+            "Радуга": "https://t.me/FAQMKBOT",
+            "Гей Знакомства": "https://t.me/FAQMKBOT",
+            "ПАРНИ 18+": "https://t.me/FAQZNAKBOT",
+            "НС": "https://t.me/FAQZNAKBOT"
+        }
+        url = faq_links.get(selected_network, "https://t.me/FAQZNAKBOT")
         markup = types.InlineKeyboardMarkup()
-        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
         markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(
             message.chat.id,
@@ -2021,18 +2093,11 @@ def handle_delete_confirmation(call):
         parse_mode="HTML"
     )
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([update])
-    return 'ok', 200
-
-@app.route('/')
-def index():
-    return '✅ Бот запущен и работает!'
-
 if __name__ == '__main__':
+    # Инициализация базы
     init_db()
+
+    # Загрузка данных
     paid_users, admins, user_posts = load_data()
 
     print(f"[📂 LOAD] Загружено: {len(paid_users)} оплат, {len(user_posts)} постов, {len(admins)} админов")
@@ -2042,13 +2107,21 @@ if __name__ == '__main__':
         if core_admin not in admins:
             admins.append(core_admin)
 
-    # 💾 Сохраняем, только если есть что
+    # 💾 Сохраняем базу только если есть данные
     if paid_users or user_posts:
         save_data()
     else:
         print("[⚠️ INIT] Пропускаем save_data(): нет данных для сохранения.")
 
+    # ✅ Одноразовая очистка просроченных оплат при старте
+    cleanup_expired_payments()
+
+    # 🔁 Запуск автоматического бэкапа
     schedule_auto_backup()
 
+    # 🕒 Таймер ежедневной очистки просроченных оплат
+    schedule_daily_cleanup()
+
+    # 🚀 Запуск Flask
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
