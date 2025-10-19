@@ -1903,6 +1903,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         city_data = all_cities.get(city, {}).get(net_key)
 
         if not city_data:
+            print(f"[DEBUG] Нет данных чата для города '{city}', сети '{network}' (ключ '{net_key}')")
+            log_failed_attempt(user_id, network, city, "Нет чата для публикации")
             continue
 
         if not is_user_paid(user_id, network, city):
@@ -1923,7 +1925,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
@@ -1972,6 +1973,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
+        # Используем первую сеть из списка, если выбрано "Все сети"
+        first_network = networks[0] if networks else selected_network
         faq_links = {
             "Мужской Клуб": "https://t.me/FAQMKBOT",
             "Радуга": "https://t.me/FAQMKBOT",
@@ -1979,7 +1982,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             "ПАРНИ 18+": "https://t.me/FAQZNAKBOT",
             "НС": "https://t.me/FAQZNAKBOT"
         }
-        url = faq_links.get(selected_network, "https://t.me/FAQZNAKBOT")
+        url = faq_links.get(first_network, "https://t.me/FAQZNAKBOT")
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(
