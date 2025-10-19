@@ -18,16 +18,24 @@ POSTS_PER_PAGE = 10
 import pytz
 from pytz import timezone
 
-def schedule_daily_cleanup():
-    cleanup_expired_payments()
-    threading.Timer(24*60*60, schedule_daily_cleanup).start()
-
 def now_ekb():
     return datetime.now(timezone('Asia/Yekaterinburg'))
 # Убедись, что используешь одну временную зону для всех дат
 ekb_tz = pytz.timezone('Asia/Yekaterinburg')
 
 today = now_ekb().astimezone(ekb_tz).date()
+
+def cleanup_expired_payments():
+    """Удаляет все оплаты, срок которых истёк, из базы paid_users."""
+    global paid_users
+    for user_id, payments in list(paid_users.items()):
+        active = [p for p in payments if datetime.fromisoformat(p["end_date"]) >= now_ekb()]
+        if active:
+            paid_users[user_id] = active
+        else:
+            del paid_users[user_id]
+    save_data()
+    print(f"[DEBUG] Очистка просроченных оплат выполнена. Активных пользователей: {len(paid_users)}")
 
 import telebot
 from telebot import types
@@ -2094,10 +2102,7 @@ def handle_delete_confirmation(call):
     )
 
 if __name__ == '__main__':
-    # Инициализация базы
     init_db()
-
-    # Загрузка данных
     paid_users, admins, user_posts = load_data()
 
     print(f"[📂 LOAD] Загружено: {len(paid_users)} оплат, {len(user_posts)} постов, {len(admins)} админов")
@@ -2107,21 +2112,16 @@ if __name__ == '__main__':
         if core_admin not in admins:
             admins.append(core_admin)
 
-    # 💾 Сохраняем базу только если есть данные
+    # 💾 Сохраняем, только если есть что
     if paid_users or user_posts:
         save_data()
     else:
         print("[⚠️ INIT] Пропускаем save_data(): нет данных для сохранения.")
 
-    # ✅ Одноразовая очистка просроченных оплат при старте
+    # ✅ Очистка просроченных оплат при старте
     cleanup_expired_payments()
 
-    # 🔁 Запуск автоматического бэкапа
     schedule_auto_backup()
 
-    # 🕒 Таймер ежедневной очистки просроченных оплат
-    schedule_daily_cleanup()
-
-    # 🚀 Запуск Flask
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
