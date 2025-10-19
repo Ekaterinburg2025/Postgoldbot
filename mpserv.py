@@ -27,7 +27,6 @@ today = now_ekb().astimezone(ekb_tz).date()
 
 def cleanup_expired_payments():
     """Удаляет все оплаты, срок которых истёк, из базы paid_users."""
-    global paid_users
     for user_id, payments in list(paid_users.items()):
         active = [p for p in payments if datetime.fromisoformat(p["end_date"]) >= now_ekb()]
         if active:
@@ -36,6 +35,11 @@ def cleanup_expired_payments():
             del paid_users[user_id]
     save_data()
     print(f"[DEBUG] Очистка просроченных оплат выполнена. Активных пользователей: {len(paid_users)}")
+
+def schedule_cleanup_12h():
+    cleanup_expired_payments()
+    # Таймер на 12 часов = 12*60*60 секунд
+    threading.Timer(12*60*60, schedule_cleanup_12h).start()
 
 import telebot
 from telebot import types
@@ -2101,6 +2105,31 @@ def handle_delete_confirmation(call):
         parse_mode="HTML"
     )
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
+    return 'ok', 200
+
+@app.route('/')
+def index():
+    return '✅ Бот запущен и работает!'
+
+def cleanup_expired_payments():
+    """Удаляет все оплаты, срок которых истёк, из базы paid_users."""
+    for user_id, payments in list(paid_users.items()):
+        active = [p for p in payments if datetime.fromisoformat(p["end_date"]) >= now_ekb()]
+        if active:
+            paid_users[user_id] = active
+        else:
+            del paid_users[user_id]
+    save_data()
+    print(f"[DEBUG] Очистка просроченных оплат выполнена. Активных пользователей: {len(paid_users)}")
+
+def schedule_cleanup_12h():
+    cleanup_expired_payments()
+    threading.Timer(12*60*60, schedule_cleanup_12h).start()  # каждые 12 часов
+
 if __name__ == '__main__':
     init_db()
     paid_users, admins, user_posts = load_data()
@@ -2112,15 +2141,13 @@ if __name__ == '__main__':
         if core_admin not in admins:
             admins.append(core_admin)
 
-    # 💾 Сохраняем, только если есть что
-    if paid_users or user_posts:
-        save_data()
-    else:
-        print("[⚠️ INIT] Пропускаем save_data(): нет данных для сохранения.")
-
-    # ✅ Очистка просроченных оплат при старте
+    # Один раз при старте очищаем просроченные оплаты
     cleanup_expired_payments()
 
+    # Запускаем автоочистку каждые 12 часов
+    schedule_cleanup_12h()
+
+    # 💾 Автобэкап (если есть функция)
     schedule_auto_backup()
 
     port = int(os.environ.get('PORT', 8080))
