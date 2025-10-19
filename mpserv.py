@@ -1865,11 +1865,7 @@ def select_network(message, text, media_type, file_id):
             reply_markup=markup,
             parse_mode="HTML"
         )
-        # Используем lambda для передачи всех параметров
-        bot.register_next_step_handler(
-            message,
-            lambda m: select_city_and_publish(m, text, selected_network, media_type, file_id)
-        )
+        bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
     else:
         bot.send_message(
             message.chat.id,
@@ -1878,35 +1874,35 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
+def get_user_html_link(user):
+    name = html.escape(user.first_name or "Без имени")
+    if user.last_name:
+        name += " " + html.escape(user.last_name)
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(
-            message,
-            lambda m: select_network(m, text, media_type, file_id)
-        )
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     city = message.text
     if city == "Выбрать другую сеть":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(
-            message,
-            lambda m: select_network(m, text, media_type, file_id)
-        )
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
-    text = escape_html(text)
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
+    text = escape_html(text)  # Экранируем пользовательский текст
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
 
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if selected_network == "Все сети" else [selected_network]
     was_published = False
 
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
+
         if not city_data:
             continue
 
@@ -1925,9 +1921,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")
+        signature = network_signatures.get(network, "")  # Без escape_html
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
+        # 💬 Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
@@ -1959,7 +1956,10 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                     message_id=sent_message.message_id
                 )
 
-                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {"posts": [], "deleted_posts": []})["posts"].append(now_ekb())
+                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {
+                    "posts": [],
+                    "deleted_posts": []
+                })["posts"].append(now_ekb())
 
                 bot.send_message(
                     message.chat.id,
@@ -1973,15 +1973,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
-        faq_links = {
-            "Мужской Клуб": "https://t.me/FAQMKBOT",
-            "Радуга": "https://t.me/FAQMKBOT",
-            "Гей Знакомства": "https://t.me/FAQMKBOT",
-            "ПАРНИ 18+": "https://t.me/FAQZNAKBOT",
-            "НС": "https://t.me/FAQZNAKBOT"
-        }
-        url = faq_links.get(selected_network, "https://t.me/FAQZNAKBOT")
         markup = types.InlineKeyboardMarkup()
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
         markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(
             message.chat.id,
