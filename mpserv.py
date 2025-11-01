@@ -74,7 +74,6 @@ ADMIN_CHAT_ID = 479938867  # Ваш ID
 
 # Глобальные переменные
 paid_users = {}
-user_temp_media = {}
 user_posts = {}
 user_daily_posts = {}
 user_statistics = {}
@@ -546,26 +545,6 @@ def get_user_name(user):
         return f"[{name}](https://t.me/{user.username})"
     else:
         return f"[{name}](tg://user?id={user.id})"
-
-def store_temp_media(user_id, media_list, caption="", media_group_id=None):
-    user_temp_media[user_id] = {
-        "media": media_list,
-        "caption": caption,
-        "media_group_id": media_group_id,
-        "timeout": time.time() + 60  # 60 сек на сбор
-    }
-
-def get_temp_media(user_id):
-    if user_id not in user_temp_media:
-        return None
-    data = user_temp_media[user_id]
-    if time.time() > data["timeout"]:
-        user_temp_media.pop(user_id, None)
-        return None
-    return data
-
-def clear_temp_media(user_id):
-    user_temp_media.pop(user_id, None)
 
 def add_paid_user(user_id, network, city, end_date):
     with db_lock:  
@@ -1151,80 +1130,6 @@ def show_user_statistics(message):
     except Exception as e:
         print(f"Ошибка при получении статистики: {e}")
         bot.send_message(message.chat.id, "Произошла ошибка при получении статистики. Попробуйте позже.")
-
-@bot.message_handler(content_types=['photo', 'video'])
-def handle_media_group(message):
-    if not message.media_group_id:
-        return  # Одиночное — уже обработано в process_text
-
-    user_id = message.from_user.id
-    group_id = message.media_group_id
-
-    # Инициализируем, если это первый файл в группе
-    if user_id not in user_temp_media or user_temp_media[user_id].get("media_group_id") != group_id:
-        user_temp_media[user_id] = {
-            "media": [],
-            "caption": message.caption or "",
-            "media_group_id": group_id,
-            "timeout": time.time() + 60
-        }
-
-    # Добавляем медиа
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        media_type = "photo"
-    elif message.video:
-        file_id = message.video.file_id
-        media_type = "video"
-    else:
-        return
-
-    # Избегаем дублирования
-    if not any(m["file_id"] == file_id for m in user_temp_media[user_id]["media"]):
-        user_temp_media[user_id]["media"].append({"type": media_type, "file_id": file_id})
-
-    # Обновляем подпись (последняя в группе)
-    if message.caption:
-        user_temp_media[user_id]["caption"] = message.caption
-
-    # Через 2 сек после последнего файла — подтверждаем
-    threading.Timer(2.0, lambda: confirm_if_group_complete(user_id, group_id)).start()
-
-
-def confirm_if_group_complete(user_id, group_id):
-    if user_id not in user_temp_media:
-        return
-    data = user_temp_media[user_id]
-    if data.get("media_group_id") != group_id:
-        return
-
-    # Ограничиваем до 10
-    if len(data["media"]) > 10:
-        data["media"] = data["media"][:10]
-
-    # Сохраняем финальные данные
-    store_temp_media(user_id, data["media"], data["caption"], group_id)
-
-    # === ОТПРАВЛЯЕМ ПРЕДПРОСМОТР АЛЬБОМА ===
-    preview_media = []
-    for i, item in enumerate(data["media"]):
-        if item["type"] == "photo":
-            media = types.InputMediaPhoto(item["file_id"])
-        else:
-            media = types.InputMediaVideo(item["file_id"])
-        if i == 0:
-            media.caption = f"Ваш альбом из {len(data['media'])} файлов:\n\n{data['caption']}\n\nВсё верно?"
-        preview_media.append(media)
-
-    try:
-        bot.send_media_group(user_id, preview_media)
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        markup.add("Да", "Нет")
-        bot.send_message(user_id, "Подтвердить публикацию?", reply_markup=markup)
-        bot.register_next_step_handler_by_chat_id(user_id, lambda m: confirm_media_and_text(m, data["caption"], is_group=True))
-    except Exception as e:
-        bot.send_message(user_id, f"Ошибка предпросмотра: {e}")
-        clear_temp_media(user_id)
 
 # Проверка оплаты пользователя
 def is_user_paid(user_id, network, city):
@@ -1867,82 +1772,42 @@ def process_text(message):
         bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
 
-    user_id = message.from_user.id
-
-    # === МЕДИАГРУППА ===
-    if message.media_group_id:
-        handle_media_group(message)
-        return
-
-    # === ОДИНОЧНОЕ МЕДИА ИЛИ ТЕКСТ ===
-    media_list = []
-    caption = ""
-
-    if message.photo:
-        media_list.append({"type": "photo", "file_id": message.photo[-1].file_id})
-        caption = message.caption or ""
-    elif message.video:
-        media_list.append({"type": "video", "file_id": message.video.file_id})
-        caption = message.caption or ""
+    if message.photo or message.video:
+        if message.photo:
+            media_type = "photo"
+            file_id = message.photo[-1].file_id
+            text = message.caption if message.caption else ""
+        elif message.video:
+            media_type = "video"
+            file_id = message.video.file_id
+            text = message.caption if message.caption else ""
     elif message.text:
-        caption = message.text
+        media_type = None
+        file_id = None
+        text = message.text
     else:
-        bot.send_message(message.chat.id, "Отправьте текст, фото или видео (до 10 в альбоме).")
+        bot.send_message(message.chat.id, "❌ Ошибка! Отправьте текст, фото или видео.")
         bot.register_next_step_handler(message, process_text)
         return
 
-    # Сохраняем временные данные
-    store_temp_media(user_id, media_list, caption)
+    confirm_text(message, text, media_type, file_id)
 
-    # === ОТПРАВЛЯЕМ ПОДТВЕРЖДЕНИЕ ===
-    if len(media_list) == 1:
-        if media_list[0]["type"] == "photo":
-            bot.send_photo(
-                message.chat.id,
-                media_list[0]["file_id"],
-                caption=f"Ваше объявление:\n\n{caption}\n\nВсё верно?",
-                reply_markup=types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True).add("Да", "Нет")
-            )
-        else:  # video
-            bot.send_video(
-                message.chat.id,
-                media_list[0]["file_id"],
-                caption=f"Ваше объявление:\n\n{caption}\n\nВсё верно?",
-                reply_markup=types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True).add("Да", "Нет")
-            )
-    else:
-        # Только текст
-        bot.send_message(
-            message.chat.id,
-            f"Ваше объявление:\n\n{caption}\n\nВсё верно?",
-            reply_markup=types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True).add("Да", "Нет")
-        )
+def confirm_text(message, text, media_type=None, file_id=None):
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    markup.add("Да", "Нет")
+    bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
+    bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
 
-    # Регистрируем обработчик ответа
-    bot.register_next_step_handler(message, lambda m: confirm_media_and_text(m, caption, is_group=len(media_list) > 1))
-
-def confirm_media_and_text(message, text, is_group=False):
+def handle_confirmation(message, text, media_type, file_id):
     if message.text.lower() == "да":
-        data = get_temp_media(message.from_user.id)
-        if not data:
-            bot.send_message(message.chat.id, "Время истекло. Начните заново.")
-            return
-
-        bot.send_message(message.chat.id, "Выберите сеть:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(
-            message,
-            select_network,
-            text=text,
-            is_group=is_group,
-            temp_data=data
-        )
+        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
     elif message.text.lower() == "нет":
-        clear_temp_media(message.from_user.id)
-        bot.send_message(message.chat.id, "Отменено. Напишите текст заново:")
+        bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
         bot.register_next_step_handler(message, process_text)
     else:
-        bot.send_message(message.chat.id, "Выберите 'Да' или 'Нет'.")
-        bot.register_next_step_handler(message, lambda m: confirm_media_and_text(m, text, is_group))
+        bot.send_message(message.chat.id, "❌ Неверный ответ. Выберите 'Да' или 'Нет'.")
+        bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
 
 def get_network_markup():
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
@@ -1971,9 +1836,8 @@ def normalize_network_key(name):
         return "gayznak"
     return None
 
-def select_network(message, text, media_type=None, file_id=None, is_group=False, temp_data=None):
+def select_network(message, text, media_type, file_id):
     if message.text == "Назад":
-        clear_temp_media(message.from_user.id)
         bot.send_message(message.chat.id, "Напишите текст объявления:")
         bot.register_next_step_handler(message, process_text)
         return
@@ -1981,30 +1845,34 @@ def select_network(message, text, media_type=None, file_id=None, is_group=False,
     selected_network = message.text.strip()
     valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства", "Все сети"]
 
-    if selected_network not in valid_networks:
-        bot.send_message(message.chat.id, "Выберите сеть из списка.")
-        bot.register_next_step_handler(message, lambda m: select_network(m, text, is_group=is_group, temp_data=temp_data))
-        return
+    if selected_network in valid_networks:
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
 
-    # Формируем список городов
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-    if selected_network == "Все сети":
-        cities = [c for c, d in all_cities.items() if len(d) >= 2]
+        if selected_network == "Все сети":
+            # Только города, которые есть минимум в 2 сетях
+            cities = [city for city, nets in all_cities.items() if len(nets) >= 2]
+        else:
+            key = normalize_network_key(selected_network)
+            cities = [city for city, nets in all_cities.items() if key in nets]
+
+        for city in cities:
+            markup.add(city)
+        markup.add("Выбрать другую сеть", "Назад")
+
+        bot.send_message(
+            message.chat.id,
+            "📍 <b>Выберите город</b> для публикации или нажмите «<i>Выбрать другую сеть</i>»:",
+            reply_markup=markup,
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
     else:
-        key = normalize_network_key(selected_network)
-        cities = [c for c, d in all_cities.items() if key in d]
-
-    for city in cities:
-        markup.add(city)
-    markup.add("Выбрать другую сеть", "Назад")
-
-    bot.send_message(message.chat.id, "Выберите город:", reply_markup=markup)
-    bot.register_next_step_handler(
-        message,
-        select_city_and_publish,
-        text, selected_network,
-        is_group=is_group, temp_data=temp_data
-    )
+        bot.send_message(
+            message.chat.id,
+            "❌ <b>Ошибка!</b> Пожалуйста, выберите одну из предложенных сетей.",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(message, process_text)
 
 def get_user_html_link(user):
     name = html.escape(user.first_name or "Без имени")
@@ -2012,28 +1880,29 @@ def get_user_html_link(user):
         name += " " + html.escape(user.last_name)
     return f'<a href="tg://user?id={user.id}">{name}</a>'
 
-def select_city_and_publish(message, text, selected_network, media_type=None, file_id=None, is_group=False, temp_data=None):
+def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
-        clear_temp_media(message.from_user.id)
-        bot.send_message(message.chat.id, "Выберите сеть:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, lambda m: select_network(m, text, is_group=is_group, temp_data=temp_data))
-        return
-    if message.text == "Выбрать другую сеть":
-        bot.send_message(message.chat.id, "Выберите сеть:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, lambda m: select_network(m, text, is_group=is_group, temp_data=temp_data))
+        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
         return
 
     city = message.text
+    if city == "Выбрать другую сеть":
+        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        return
+
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
-    text = escape_html(text)
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if selected_network == "Все сети" else [selected_network]
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
+    text = escape_html(text)  # Экранируем пользовательский текст
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
 
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
+
         if not city_data:
             continue
 
@@ -2041,60 +1910,41 @@ def select_city_and_publish(message, text, selected_network, media_type=None, fi
             log_failed_attempt(user_id, network, city, "Нет доступа")
             continue
 
-        stats = get_user_statistics(user_id)
-        if stats["details"].get(network, {}).get(city, {}).get("remaining", 0) <= 0:
+        user_stats = get_user_statistics(user_id)
+        city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
+        if city_stats.get("remaining", 0) <= 0:
+            bot.send_message(
+                message.chat.id,
+                f"⛔ Лимит публикаций исчерпан для <b>{escape_html(network)}</b>, город <b>{escape_html(city)}</b>",
+                parse_mode="HTML"
+            )
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")
-        full_caption = f"Объявление от {user_name}:\n\n{text}\n\n{signature}"
+        signature = network_signatures.get(network, "")  # Без escape_html
+        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
+        # 💬 Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
-        reply_markup.add(types.InlineKeyboardButton("Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
+        reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
         for location in city_data:
             chat_id = location["chat_id"]
             try:
-                sent_message_id = None
-
-                # === АЛЬБОМ ===
-                if is_group and temp_data and len(temp_data["media"]) > 1:
-                    media_group = []
-                    for i, item in enumerate(temp_data["media"]):
-                        if item["type"] == "photo":
-                            media = types.InputMediaPhoto(item["file_id"])
-                        else:
-                            media = types.InputMediaVideo(item["file_id"])
-                        if i == 0:
-                            media.caption = full_caption
-                            media.parse_mode = "HTML"
-                        media_group.append(media)
-                    sent = bot.send_media_group(chat_id, media_group, reply_markup=reply_markup)
-                    sent_message_id = sent[0].message_id
-
-                # === ОДИНОЧНОЕ МЕДИА ===
-                elif temp_data and len(temp_data["media"]) == 1:
-                    item = temp_data["media"][0]
-                    if item["type"] == "photo":
-                        sent = bot.send_photo(chat_id, item["file_id"], caption=full_caption, parse_mode="HTML", reply_markup=reply_markup)
-                    else:
-                        sent = bot.send_video(chat_id, item["file_id"], caption=full_caption, parse_mode="HTML", reply_markup=reply_markup)
-                    sent_message_id = sent.message_id
-
-                # === ТОЛЬКО ТЕКСТ ===
+                if media_type == "photo":
+                    sent_message = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                elif media_type == "video":
+                    sent_message = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
                 else:
-                    sent = bot.send_message(chat_id, full_caption, parse_mode="HTML", reply_markup=reply_markup)
-                    sent_message_id = sent.message_id
+                    sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
-                # Сохраняем пост
                 user_posts.setdefault(user_id, []).append({
-                    "message_id": sent_message_id,
+                    "message_id": sent_message.message_id,
                     "chat_id": chat_id,
                     "time": now_ekb(),
                     "city": location["name"],
                     "network": network,
-                    "user_name": get_user_html_link(message.from_user),
-                    "is_album": is_group and len(temp_data["media"]) > 1
+                    "user_name": get_user_html_link(message.from_user)
                 })
 
                 add_post_to_history(
@@ -2103,28 +1953,34 @@ def select_city_and_publish(message, text, selected_network, media_type=None, fi
                     network=network,
                     city=location["name"],
                     chat_id=chat_id,
-                    message_id=sent_message_id
+                    message_id=sent_message.message_id
                 )
 
-                update_daily_posts(user_id, network, city, remove=False)
+                user_daily_posts.setdefault(user_id, {}).setdefault(network, {}).setdefault(city, {
+                    "posts": [],
+                    "deleted_posts": []
+                })["posts"].append(now_ekb())
 
-                bot.send_message(message.chat.id,
-                                 f"Опубликовано в <b>{escape_html(network)}</b> → <b>{escape_html(location['name'])}</b>",
-                                 parse_mode="HTML")
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ Объявление опубликовано в сети <b>{escape_html(network)}</b>, городе <b>{escape_html(location['name'])}</b>.",
+                    parse_mode="HTML"
+                )
                 was_published = True
 
-            except Exception as e:
-                log_failed_attempt(user_id, network, city, f"Ошибка: {e}")
-                bot.send_message(message.chat.id, f"Ошибка в {network}: {e}", parse_mode="HTML")
-
-    # Очистка
-    clear_temp_media(user_id)
+            except telebot.apihelper.ApiTelegramException as e:
+                log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e.description}")
+                bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
     if not was_published:
         markup = types.InlineKeyboardMarkup()
-        url = "https://t.me/FAQMKBOT" if "Мужской Клуб" in networks else "https://t.me/FAQZNAKBOT"
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
         markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
-        bot.send_message(message.chat.id, "Нет доступа. Купите рекламу.", reply_markup=markup)
+        bot.send_message(
+            message.chat.id,
+            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
+            reply_markup=markup
+        )
 
     save_data()
     ask_for_new_post(message)
