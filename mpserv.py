@@ -1893,8 +1893,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
-    text = escape_html(text)  # Экранируем пользовательский текст
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>' # НЕ экранируем!
+    text = escape_html(text) # Экранируем пользовательский текст
+
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
@@ -1912,6 +1913,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
+
         if city_stats.get("remaining", 0) <= 0:
             bot.send_message(
                 message.chat.id,
@@ -1921,12 +1923,19 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")  # Без escape_html
+        signature = network_signatures.get(network, "") # Без escape_html
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # 💬 Кнопка "Напиши мне в ЛС"
+        # 💬 Кнопка "Напиши мне в ЛС" — ЗЕЛЁНАЯ + ТВОЙ премиум эмодзи
         reply_markup = types.InlineKeyboardMarkup()
-        reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
+        reply_markup.add(
+            types.InlineKeyboardButton(
+                text="Напиши мне в ЛС",
+                url=f"tg://user?id={user_id}",
+                style="success",                          # Зелёная кнопка
+                icon_custom_emoji_id="5470060791883374114"   # ТВОЙ ID облачка
+            )
+        )
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1975,7 +1984,14 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     if not was_published:
         markup = types.InlineKeyboardMarkup()
         url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
+        markup.add(
+            types.InlineKeyboardButton(
+                text="Купить рекламу",
+                url=url,
+                style="danger",                           # Красная кнопка
+                icon_custom_emoji_id="5420315771991497307"   # ТВОЙ ID огонька
+            )
+        )
         bot.send_message(
             message.chat.id,
             "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
