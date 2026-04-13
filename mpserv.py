@@ -1930,7 +1930,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 text="Напиши мне в ЛС",
                 url=f"tg://user?id={user_id}",
                 style="success",                          # Зелёная кнопка
-                icon_custom_emoji_id="5470060791883374114"   # ← ТВОЙ ID облачка/чата
+                icon_custom_emoji_id="5470060791883374114"   # ← ТВОЙ ID облачка
             )
         )
 
