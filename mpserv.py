@@ -1876,12 +1876,6 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
-def get_user_html_link(user):
-    name = html.escape(user.first_name or "Без имени")
-    if user.last_name:
-        name += " " + html.escape(user.last_name)
-    return f'<a href="tg://user?id={user.id}">{name}</a>'
-
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1895,9 +1889,11 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
-    text = escape_html(text)  # Экранируем пользовательский текст
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
+    text = escape_html(text)
+
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] \
+        if selected_network == "Все сети" else [selected_network]
 
     was_published = False
 
@@ -1914,6 +1910,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
+
         if city_stats.get("remaining", 0) <= 0:
             bot.send_message(
                 message.chat.id,
@@ -1923,12 +1920,21 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")  # Без escape_html
+        signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # 💬 Кнопка "Напиши мне в ЛС"
+        # ==================== КНОПКИ С ТВОИМИ ПРЕМИУМ ЭМОДЗИ ====================
+
+        # Кнопка "Напиши мне в ЛС" — ЗЕЛЁНАЯ + твоё облачко/чат
         reply_markup = types.InlineKeyboardMarkup()
-        reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
+        reply_markup.add(
+            types.InlineKeyboardButton(
+                text="Напиши мне в ЛС",
+                url=f"tg://user?id={user_id}",
+                style="success",
+                icon_custom_emoji_id="5470060791883374114"   # ← ТВОЙ ID облачка
+            )
+        )
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1940,6 +1946,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 else:
                     sent_message = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
 
+                # сохранение поста (без изменений)
                 user_posts.setdefault(user_id, []).append({
                     "message_id": sent_message.message_id,
                     "chat_id": chat_id,
@@ -1970,18 +1977,27 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 )
                 was_published = True
 
-            except telebot.apihelper.ApiTelegramException as e:
-                log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e.description}")
-                bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
+            except Exception as e:
+                log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e}")
+                bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(str(e))}", parse_mode="HTML")
 
+    # Кнопка "Купить рекламу" — КРАСНАЯ + твой огонёк
     if not was_published:
         markup = types.InlineKeyboardMarkup()
         url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
-        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
+        markup.add(
+            types.InlineKeyboardButton(
+                text="Купить рекламу",
+                url=url,
+                style="danger",
+                icon_custom_emoji_id="5420315771991497307"   # ← ТВОЙ ID огонька
+            )
+        )
         bot.send_message(
             message.chat.id,
-            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
-            reply_markup=markup
+            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору или купите доступ.",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
 
     save_data()
