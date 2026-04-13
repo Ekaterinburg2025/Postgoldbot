@@ -1889,8 +1889,8 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
-    text = escape_html(text)  # Экранируем пользовательский текст
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'   # НЕ экранируем!
+    text = escape_html(text)                                        # Экранируем пользовательский текст
 
     networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] \
         if selected_network == "Все сети" else [selected_network]
@@ -1930,7 +1930,7 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 text="Напиши мне в ЛС",
                 url=f"tg://user?id={user_id}",
                 style="success",                          # Зелёная кнопка
-                icon_custom_emoji_id="5470060791883374114"   # ← ТВОЙ ID облачка
+                icon_custom_emoji_id="5470060791883374114"   # ТВОЙ ID облачка
             )
         )
 
@@ -1981,13 +1981,13 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
     # ==================== КНОПКА ПРИ ОТКАЗЕ В ПУБЛИКАЦИИ ====================
     if not was_published:
         markup = types.InlineKeyboardMarkup()
-        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQMKBOT"
         markup.add(
             types.InlineKeyboardButton(
                 text="Купить рекламу",
                 url=url,
                 style="danger",                           # Красная кнопка
-                icon_custom_emoji_id="5420315771991497307"   # ← ТВОЙ ID огонька
+                icon_custom_emoji_id="5420315771991497307"   # ТВОЙ ID огонька
             )
         )
         bot.send_message(
