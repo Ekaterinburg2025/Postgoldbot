@@ -359,8 +359,9 @@ def load_data():
 init_db()
 paid_users, admins, user_posts = load_data()
 
-# ==================== СЛОВАРИ ЧАТОВ (актуальные на апрель 2026) ====================
+# 🧠 Автогенерация all_cities на основе chat_ids_* и учёта особых случаев
 
+# Старые словари:
 chat_ids_mk = {
     "Екатеринбург": -1002210043742,
     "Челябинск": -1002238514762,
@@ -396,16 +397,12 @@ chat_ids_parni = {
     "Тюмень": -1002255622479,
     "Омск": -1002274367832,
     "Челябинск": -1002406302365,
-    "Пермь": -1002280860973,           # исправлено
+    "Перми": -1002280860973,
     "Курган": -1002469285352,
     "ХМАО": -1002287709568,
     "Уфа": -1002448909000,
     "Новосибирск": -1002261777025,
-    "Ямал": -1002371438340,            # исправлено и нормализовано
-    "Оренбург": -1003888335997,
-    "Москва": -1003856528145,
-    "Питер": -1003519420984,
-    "Красноярск": -1003347456711
+    "ЯМАО": -1002371438340
 }
 
 chat_ids_ns = {
@@ -422,10 +419,12 @@ chat_ids_ns = {
     "Знакомства 74": -1002193127380
 }
 
+# Новая сеть: Радуга (один общий чат)
 chat_ids_rainbow = {
     "Екатеринбург": -1002419653224
 }
 
+# Новая сеть: ГЕЙ Знакомства (по городам)
 chat_ids_gayznak = {
     "Красноярск": -1002335149925,
     "Екатеринбург": -1002571605722,
@@ -446,12 +445,11 @@ def normalize_city_name(name):
     mapping = {
         "Перми": "Пермь",
         "ЯМАО": "Ямал",
-        "ЯМАЛ": "Ямал",
         "Знакомства 66": "Екатеринбург",
         "Знакомства 72": "Тюмень",
-        "Знакомства 74": "Челябинск",
+        "Знакомства 74": "Челябинск"
     }
-    return mapping.get(name.strip(), name.strip())
+    return mapping.get(name, name)
 
 # Автоматическая сборка all_cities
 all_cities = {}
@@ -1876,6 +1874,12 @@ def select_network(message, text, media_type, file_id):
         )
         bot.register_next_step_handler(message, process_text)
 
+def get_user_html_link(user):
+    name = html.escape(user.first_name or "Без имени")
+    if user.last_name:
+        name += " " + html.escape(user.last_name)
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
+
 def select_city_and_publish(message, text, selected_network, media_type, file_id):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
@@ -1889,11 +1893,9 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
         return
 
     user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'   # НЕ экранируем!
-    text = escape_html(text)                                        # Экранируем пользовательский текст
-
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] \
-        if selected_network == "Все сети" else [selected_network]
+    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'  # НЕ экранируем!
+    text = escape_html(text)  # Экранируем пользовательский текст
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
 
@@ -1910,7 +1912,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
 
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
-
         if city_stats.get("remaining", 0) <= 0:
             bot.send_message(
                 message.chat.id,
@@ -1920,19 +1921,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             log_failed_attempt(user_id, network, city, "Лимит исчерпан")
             continue
 
-        signature = network_signatures.get(network, "")
+        signature = network_signatures.get(network, "")  # Без escape_html
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
 
-        # ==================== КНОПКИ С ЦВЕТОМ И ТВОИМИ ПРЕМИУМ ЭМОДЗИ ====================
+        # 💬 Кнопка "Напиши мне в ЛС"
         reply_markup = types.InlineKeyboardMarkup()
-        reply_markup.add(
-            types.InlineKeyboardButton(
-                text="Напиши мне в ЛС",
-                url=f"tg://user?id={user_id}",
-                style="success",                          # Зелёная кнопка
-                icon_custom_emoji_id="5470060791883374114"   # ТВОЙ ID облачка
-            )
-        )
+        reply_markup.add(types.InlineKeyboardButton("💬 Напиши мне в ЛС", url=f"tg://user?id={user_id}"))
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1978,23 +1972,14 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 log_failed_attempt(user_id, network, city, f"Ошибка отправки: {e.description}")
                 bot.send_message(message.chat.id, f"❌ <b>Ошибка:</b> {escape_html(e.description)}", parse_mode="HTML")
 
-    # ==================== КНОПКА ПРИ ОТКАЗЕ В ПУБЛИКАЦИИ ====================
     if not was_published:
         markup = types.InlineKeyboardMarkup()
-        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQMKBOT"
-        markup.add(
-            types.InlineKeyboardButton(
-                text="Купить рекламу",
-                url=url,
-                style="danger",                           # Красная кнопка
-                icon_custom_emoji_id="5420315771991497307"   # ТВОЙ ID огонька
-            )
-        )
+        url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
+        markup.add(types.InlineKeyboardButton("Купить рекламу", url=url))
         bot.send_message(
             message.chat.id,
-            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору или купите доступ.",
-            reply_markup=markup,
-            parse_mode="HTML"
+            "⛔ У вас нет прав на публикацию в этой сети/городе. Обратитесь к администратору.",
+            reply_markup=markup
         )
 
     save_data()
