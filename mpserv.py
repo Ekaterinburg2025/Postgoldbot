@@ -23,6 +23,13 @@ def now_ekb():
 ekb_tz = pytz.timezone('Asia/Yekaterinburg')
 today = now_ekb().astimezone(ekb_tz).date()
 
+def to_ekb_str(dt, format_str='%d.%m.%Y %H:%M'):
+    """Принудительно переводит время из MongoDB (UTC) обратно в ЕКБ для админки"""
+    if dt is None: return "неизвестно"
+    if dt.tzinfo is None: # Если дата из Mongo (она всегда UTC)
+        dt = pytz.utc.localize(dt)
+    return dt.astimezone(pytz.timezone('Asia/Yekaterinburg')).strftime(format_str)
+
 import telebot
 from telebot import types
 from telebot.apihelper import ApiTelegramException
@@ -713,7 +720,7 @@ def show_paid_users(message):
         network = escape_html(sub.get("network"))
         city = escape_html(sub.get("city"))
         end_date = sub.get("end_date")
-        date_str = end_date.strftime("%d.%m.%Y %H:%M")
+        date_str = to_ekb_str(end_date)
 
         if user_id != current_user:
             try:
@@ -748,7 +755,7 @@ def select_user_for_duration_change(message):
             net = sub.get('network', 'Неизвестно')
             city = sub.get('city', 'Неизвестно')
             sub_id = str(sub['_id']) # Уникальный ID конкретной покупки
-            end_date = sub['end_date'].strftime('%d.%m.%Y')
+            end_date = to_ekb_str(sub['end_date'], '%d.%m.%Y')
             
             btn_text = f"🧩 {net} | 📍 {city} (до {end_date})"
             markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"manage_sub_{sub_id}"))
@@ -798,11 +805,11 @@ def handle_duration_change(call):
 
         bot.answer_callback_query(call.id, f"✅ Срок изменён на {days} дней.")
         
-        # Отчитываемся админу об успехе
+        # Отчитываемся админу об успехе (используем наш новый переводчик to_ekb_str)
         success_text = (f"✅ <b>Срок успешно изменён!</b>\n\n"
                         f"🌐 Сеть: <b>{escape_html(sub.get('network'))}</b>\n"
                         f"📍 Город: <b>{escape_html(sub.get('city'))}</b>\n"
-                        f"⏳ Новая дата окончания: <b>{new_date.strftime('%d.%m.%Y %H:%M')}</b>")
+                        f"⏳ Новая дата окончания: <b>{to_ekb_str(new_date)}</b>")
         bot.edit_message_text(success_text, call.message.chat.id, call.message.message_id, parse_mode="HTML")
 
     except Exception as e:
@@ -1445,6 +1452,17 @@ def successful_payment(message):
             "has_pin": has_pin # Сохраняем статус закрепа!
         })
 
+        # 🔔 НОВАЯ ЧАСТЬ: УВЕДОМЛЕНИЕ АДМИНУ ОБ ОПЛАТЕ
+        try:
+            bot.send_message(
+                ADMIN_CHAT_ID, 
+                f"💰 **Новая продажа!**\nЮзер: <code>{user_id}</code>\nСеть: <b>{network}</b>\nГород: <b>{city}</b>\nСрок: <b>{days}</b> дн.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            pass # Если у бота не получится написать админу, он просто пойдет дальше
+
+        # СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЮ
         try:
             bot.send_message(
                 user_id, 
