@@ -51,14 +51,6 @@ bot = telebot.TeleBot(TOKEN)
 # Создаём Flask-приложение
 app = Flask(__name__)
 
-admins_collection = db['admins'] # Новая коллекция для админов
-
-# ADMIN ID (ваш ID)
-ADMIN_CHAT_ID = 479938867  # Ваш ID
-
-# 🔒 Вечные (статичные) админы
-CORE_ADMINS = [479938867, 7235010425]
-
 # ==================== БАЗА ДАННЫХ MONGODB ====================
 MONGO_URI = os.getenv('MONGO_URI')
 if not MONGO_URI:
@@ -73,6 +65,12 @@ ad_posts_collection = db['ad_posts']        # НОВАЯ: Опубликован
 promocodes_collection = db['promocodes']    # СУЩЕСТВУЮЩАЯ ИЗ СКАЙНЕТА
 admins_collection = db['admins']            # НОВАЯ: Список админов
 # =============================================================
+
+# ADMIN ID (ваш ID)
+ADMIN_CHAT_ID = 479938867  # Ваш ID
+
+# 🔒 Вечные (статичные) админы
+CORE_ADMINS = [479938867, 7235010425]
 
 import traceback
 
