@@ -60,14 +60,19 @@ ADMIN_CHAT_ID = 479938867  # Ваш ID
 CORE_ADMINS = [479938867, 7235010425]
 
 # ==================== БАЗА ДАННЫХ MONGODB ====================
-MONGO_URI = os.getenv('MONGO_URI') # Убедись, что переменная окружения задана!
+MONGO_URI = os.getenv('MONGO_URI')
+if not MONGO_URI:
+    raise ValueError("❌ КРИТИЧЕСКАЯ ОШИБКА: Не задана переменная MONGO_URI на сервере!")
+
 mongo_client = pymongo.MongoClient(MONGO_URI)
-db = mongo_client['elite_bot_db']
+db = mongo_client['elite_bot_db'] # Подключаемся к ЕДИНОЙ базе Скайнета!
 
 # Коллекции, которые нам понадобятся:
-ad_subs_collection = db['ad_subscriptions'] # НОВАЯ: Подписки на рекламу (заменит paid_users)
-ad_posts_collection = db['ad_posts']        # НОВАЯ: Опубликованные посты (заменит user_posts)
+ad_subs_collection = db['ad_subscriptions'] # НОВАЯ: Подписки на рекламу
+ad_posts_collection = db['ad_posts']        # НОВАЯ: Опубликованные посты
 promocodes_collection = db['promocodes']    # СУЩЕСТВУЮЩАЯ ИЗ СКАЙНЕТА
+admins_collection = db['admins']            # НОВАЯ: Список админов
+# =============================================================
 
 import traceback
 
