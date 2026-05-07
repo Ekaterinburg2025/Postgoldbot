@@ -1110,24 +1110,20 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             markup.add(types.InlineKeyboardButton("🎫 У меня есть промокод", callback_data=f"ad_promo_{network}_{city}"))
             
             # --- УМНАЯ СКИДКА (НАКОПИТЕЛЬНАЯ + ОПТ) ---
-            # 1. Считаем, сколько уникальных сетей в этом городе у юзера УЖЕ активно
             already_active_nets = len(ad_subs_collection.distinct("network", {
                 "user_id": user_id, 
                 "city": city, 
                 "end_date": {"$gt": now_ekb()}
             }))
             
-            # 2. Считаем, сколько сетей он покупает СЕЙЧАС
             if network == "Все сети":
-                # Если берет всё оптом, считаем, сколько сетей доступно в этом городе
                 nets_in_city = len([n for n, d in all_cities[city].items() if d])
-                buying_now = nets_in_city - already_active_nets # Не продаем то, что уже куплено
+                buying_now = nets_in_city - already_active_nets
                 total_nets_count = nets_in_city
             else:
                 buying_now = 1
                 total_nets_count = already_active_nets + 1
             
-            # 3. Определяем процент скидки
             discount_percent = 0
             if total_nets_count == 3:
                 discount_percent = 10
@@ -1136,29 +1132,40 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             elif total_nets_count >= 5:
                 discount_percent = 30
 
-            # Генерируем кнопки с ценами на лету! (Обычная + Закреп)
             for days in [1, 7, 15, 30]:
                 base_price = get_price_for_chat(chat_id, days)
                 if base_price:
-                    # Умножаем базовую цену одной сети на количество покупаемых сетей
                     total_base_price = base_price * buying_now
-                    
-                    # Применяем прогрессивную скидку
                     final_price = int(total_base_price * (1 - discount_percent / 100))
-                    
-                    # Цена с закрепом (+20% к финальной цене)
                     pin_price = int(final_price * 1.2) 
                     
-                    # Формируем текст на кнопке (показываем скидку, если она есть)
                     btn_text = f"💳 {days} дн. ({final_price}⭐️)"
                     if discount_percent > 0:
                         btn_text = f"🔥 {days} дн. (-{discount_percent}% за {final_price}⭐️)"
                     
-                    # Добавляем сразу две кнопки в один ряд!
                     markup.row(
                         types.InlineKeyboardButton(btn_text, callback_data=f"ad_pay_{days}_{network}_{city}"),
                         types.InlineKeyboardButton(f"📌 +Закреп ({pin_price}⭐️)", callback_data=f"ad_paypin_{days}_{network}_{city}")
                     )
+
+            # --- ЛАЙФХАК СО ЗВЕЗДАМИ (ВСТАВКА) ---
+            cheap_stars_text = (
+                "💡 **Лайфхак: Как купить звёзды ДЕШЕВЛЕ официального курса?**\n\n"
+                "Перед оплатой рекомендуем приобрести звёзды через проверенный сервис. "
+                "Это выйдет значительно выгоднее, чем покупать их напрямую через Telegram.\n\n"
+                "**Инструкция:**\n"
+                "1️⃣ Перейдите по ссылке: https://t.me/Avrrorkastarbot?start=7924963993\n"
+                "2️⃣ Нажмите кнопку «⭐️ Купить звезды»\n"
+                "3️⃣ Выберите пункт «👤 Себе»\n"
+                "4️⃣ Выберите пакет звезд, подходящий для вашего тарифа\n"
+                "5️⃣ Оплатите удобным способом\n\n"
+                "После покупки возвращайтесь сюда и выбирайте тариф ниже! 👇"
+            )
+            try:
+                bot.send_message(message.chat.id, cheap_stars_text, parse_mode="Markdown", disable_web_page_preview=True)
+            except:
+                pass
+            # ------------------------------------
 
             bot.send_message(
                 message.chat.id,
