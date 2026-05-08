@@ -1423,52 +1423,6 @@ def process_ad_promo(message, network, city):
             
     bot.send_message(message.chat.id, f"✅ <b>Промокод применен!</b> Выберите тариф:", reply_markup=markup, parse_mode="HTML")
 
-# ================= КАССА (ОБЩАЯ ДЛЯ ВСЕХ) =================
-@bot.callback_query_handler(func=lambda call: call.data.startswith('ad_pay_') or call.data.startswith('ad_paypin_'))
-def handle_ad_checkout(call):
-    bot.answer_callback_query(call.id) # 🛑 Снимаем залипание!
-    
-    is_pin = call.data.startswith('ad_paypin_')
-    parts = call.data.split('_')
-    
-    days = int(parts[2])
-    network = parts[3] # Тут родное "Мужской Клуб"
-    city = parts[4]
-    
-    net_key = normalize_network_key(network)
-    chat_id = all_cities[city][net_key][0]["chat_id"]
-    base_price = get_price_for_chat(chat_id, days)
-    amount = int(base_price * 1.2) if is_pin else base_price
-    
-    # ПРОВЕРЯЕМ, ЕСТЬ ЛИ У ЮЗЕРА АКТИВНЫЙ ПРОМОКОД
-    user_data = db['users'].find_one({"_id": call.from_user.id})
-    temp_promo = user_data.get("temp_promo") if user_data else None
-    
-    payload = f"ad_access_discount_{days}_{network}_{city}_{temp_promo}" if temp_promo else f"ad_access_{days}_{network}_{city}"
-    if is_pin: payload += "_pin"
-    
-    description_text = f"Сеть: {network}\nГород: {city}\nСрок: {days} дн."
-    
-    if temp_promo:
-        promo_data = promocodes_collection.find_one({"_id": temp_promo})
-        if promo_data:
-            discount = promo_data["value"]
-            amount = int(amount * (1 - discount / 100))
-            description_text += f"\n🎁 Промокод: {temp_promo} (-{discount}%)"
-            
-        # Удаляем временный промокод
-        db['users'].update_one({"_id": call.from_user.id}, {"$unset": {"temp_promo": ""}})
-    
-    bot.send_invoice(
-        call.message.chat.id, 
-        title="Доступ + ЗАКРЕП 📌" if is_pin else "Доступ к публикации 📢", 
-        description=description_text, 
-        invoice_payload=payload, 
-        provider_token="", 
-        currency="XTR", 
-        prices=[types.LabeledPrice(label="Рекламный доступ", amount=amount)]
-    )
-
 @bot.pre_checkout_query_handler(func=lambda query: query.invoice_payload.startswith("ad_access_"))
 def checkout_process(pre_checkout_query):
     bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
