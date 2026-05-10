@@ -1342,21 +1342,25 @@ def successful_payment(message):
         
         if "discount" in payload:
             days = int(parts[3])
-            network = parts[4] # Родное название сети
+            net_key = parts[4] # Получаем короткий ключ (mk)
             city = parts[5]
             promo_code = parts[6]
             promocodes_collection.update_one({"_id": promo_code}, {"$inc": {"used_count": 1}})
         else:
             days = int(parts[2])
-            network = parts[3] # Родное название сети
+            net_key = parts[3] # Получаем короткий ключ (mk)
             city = parts[4]
+
+        # 💎 ПЕРЕВОДЧИК: Возвращаем красивое имя перед записью в базу!
+        names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
+        network = names.get(net_key, net_key)
 
         end_date = now_ekb() + timedelta(days=days)
 
         # 💥 ЗАПИСЬ В БАЗУ ДАННЫХ
         ad_subs_collection.insert_one({
             "user_id": user_id,
-            "network": network,
+            "network": network, # Теперь в базу пойдет "Мужской Клуб"
             "city": city,
             "end_date": end_date,
             "purchase_date": now_ekb(),
