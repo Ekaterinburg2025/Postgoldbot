@@ -1332,11 +1332,14 @@ def checkout_process(pre_checkout_query):
 def successful_payment(message):
     user_id = message.from_user.id
     payload = message.successful_payment.invoice_payload
+    # 👇 НОВАЯ СТРОЧКА (Достаем сумму) 👇
+    amount = message.successful_payment.total_amount
 
     if payload.startswith("ad_access_"):
+        # 👇 НОВАЯ СТРОЧКА (Пишем в копилку) 👇
+        db['daily_revenue'].insert_one({"type": "ads", "amount": amount, "timestamp": time.time(), "date": now_ekb().strftime("%d.%m.%Y")})
+
         has_pin = "_pin" in payload 
-        
-        # Убираем хвостик _pin, чтобы он не мешал нам делить строку
         clean_payload = payload.replace("_pin", "")
         parts = clean_payload.split('_')
         
@@ -1426,105 +1429,6 @@ def process_ad_promo(message, network, city):
             )
             
     bot.send_message(message.chat.id, f"✅ <b>Промокод применен!</b> Выберите тариф:", reply_markup=markup, parse_mode="HTML")
-
-@bot.pre_checkout_query_handler(func=lambda query: query.invoice_payload.startswith("ad_access_"))
-def checkout_process(pre_checkout_query):
-    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-@bot.message_handler(content_types=['successful_payment'])
-def successful_payment(message):
-    user_id = message.from_user.id
-    payload = message.successful_payment.invoice_payload
-
-    if payload.startswith("ad_access_"):
-        has_pin = "_pin" in payload 
-        clean_payload = payload.replace("_pin", "")
-        parts = clean_payload.split('_')
-        
-        if "discount" in payload:
-            days = int(parts[3])
-            net_key = parts[4] 
-            city = parts[5]
-            promo_code = parts[6]
-            promocodes_collection.update_one({"_id": promo_code}, {"$inc": {"used_count": 1}})
-        else:
-            days = int(parts[2])
-            net_key = parts[3] 
-            city = parts[4]
-
-        # Переводим короткий код обратно в полное название для записи в Базу!
-        names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
-        network = names.get(net_key, net_key)
-
-        end_date = now_ekb() + timedelta(days=days)
-
-        ad_subs_collection.insert_one({
-            "user_id": user_id,
-            "network": network,
-            "city": city,
-            "end_date": end_date,
-            "purchase_date": now_ekb(),
-            "has_pin": has_pin 
-        })
-
-        try: bot.send_message(ADMIN_CHAT_ID, f"💰 **Новая продажа!**\nЮзер: <code>{user_id}</code>\nСеть: <b>{network}</b>\nГород: <b>{city}</b>\nСрок: <b>{days}</b> дн.", parse_mode="HTML")
-        except: pass
-
-        try: bot.send_message(user_id, f"✅ **Оплата успешно получена!**\n\nДоступ к сети **{network}** ({city}) открыт на {days} дней.\nНажмите «Создать новое объявление».", parse_mode="Markdown")
-        except: pass
-
-# ================= ПРОМОКОДЫ ДЛЯ РЕКЛАМЫ =================
-@bot.callback_query_handler(func=lambda call: call.data.startswith('ad_promo_'))
-def handle_ad_promo(call):
-    bot.answer_callback_query(call.id)
-    
-    parts = call.data.split('_')
-    net_key = parts[2] # Короткий код (mk, ns)
-    city = parts[3]
-    
-    msg = bot.send_message(call.message.chat.id, "👇 <b>Введите ваш промокод ответом на это сообщение:</b>", parse_mode="HTML")
-    bot.register_next_step_handler(msg, process_ad_promo, net_key, city)
-
-def process_ad_promo(message, net_key, city):
-    promo_text = message.text.strip().upper()
-    promo_data = promocodes_collection.find_one({"_id": promo_text})
-    
-    # 💥 ИСПРАВЛЕНИЕ: Теперь по умолчанию считаем промокод активным
-    if not promo_data or promo_data.get("is_active", True) == False:
-        bot.send_message(message.chat.id, "❌ Промокод не найден или отключен.")
-        return
-        
-    if promo_data["used_count"] >= promo_data.get("usage_limit", 1):
-        bot.send_message(message.chat.id, "❌ Лимит активаций этого промокода исчерпан.")
-        return
-        
-    if promo_data.get("target") not in ["all", "ads"]:
-        bot.send_message(message.chat.id, "❌ Этот промокод нельзя применить к покупке рекламы.")
-        return
-
-    db['users'].update_one({"_id": message.from_user.id}, {"$set": {"temp_promo": promo_text}}, upsert=True)
-
-    discount = promo_data["value"]
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    chat_id = all_cities[city][net_key][0]["chat_id"]
-    
-    # Красивое имя для ответа
-    names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
-    network = names.get(net_key, net_key)
-
-    for days in [1, 7, 15, 30]:
-        base_p = get_price_for_chat(chat_id, days)
-        if base_p:
-            f_price = int(base_p * (1 - discount / 100))
-            pin_p = int(f_price * 1.2)
-            
-            # Скрытая дата: ТОЛЬКО КОРОТКИЙ КОД
-            markup.row(
-                types.InlineKeyboardButton(f"💳 {days} дн. ({f_price}⭐️)", callback_data=f"ad_pay_{days}_{net_key}_{city}"),
-                types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{net_key}_{city}")
-            )
-            
-    bot.send_message(message.chat.id, f"✅ <b>Промокод применен!</b> Скидка {discount}%. Выберите тариф для <b>{network}</b>:", reply_markup=markup, parse_mode="HTML")
 
 # ================= КАССА (ОБЩАЯ ДЛЯ ВСЕХ) =================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ad_pay_') or call.data.startswith('ad_paypin_'))
