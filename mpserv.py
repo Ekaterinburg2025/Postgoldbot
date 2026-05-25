@@ -1429,7 +1429,7 @@ def process_ad_promo(message, network, city):
 
     discount = promo_data["value"]
     markup = types.InlineKeyboardMarkup(row_width=1)
-    net_key = normalize_network_key(network)
+    net_key = network
     chat_id = all_cities[city][net_key][0]["chat_id"]
     
     for days in [1, 7, 15, 30]:
