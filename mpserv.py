@@ -281,26 +281,42 @@ BIG_CHATS = [
 ]
 
 def get_price_for_chat(chat_id, days):
-    """Динамический расчет стоимости в Звездах (XTR)"""
+    """Динамический расчет стоимости рекламы из MongoDB"""
+    try:
+        prices = db['settings'].find_one({"_id": "skynet_pricing"})
+    except:
+        prices = None
+
+    if not prices:
+        # Резервный бэкап тарифов на случай сбоя связи с Mongo
+        prices = {
+            "vip_big_chat_1": 1095, "vip_big_chat_7": 7656,
+            "reg_small_1": 105, "reg_small_7": 490, "reg_small_15": 720, "reg_small_30": 938,
+            "reg_big_1": 105, "reg_big_7": 656, "reg_big_15": 1288, "reg_big_30": 1563
+        }
+
     # 1. Если это БИГ-чат
     if chat_id in BIG_CHATS:
-        if days == 1: return 1095
-        if days == 7: return 7656
-        return None # В биг-чатах продаем только на 1 и 7 дней
+        if days == 1: return prices.get("vip_big_chat_1", 1095)
+        if days == 7: return prices.get("vip_big_chat_7", 7656)
+        return None
         
-    # 2. Узнаем размер обычного чата (если не удалось, считаем мелким)
+    # 2. Узнаем размер обычного чата
     try:
         count = bot.get_chat_member_count(chat_id)
     except:
         count = 500 
         
-    # 3. Выдаем цену по нашей матрице
+    # 3. Выдаем цену по динамической матрице
     if count > 1000:
-        prices = {1: 105, 7: 656, 15: 1288, 30: 1563}
+        day_map = {1: "reg_big_1", 7: "reg_big_7", 15: "reg_big_15", 30: "reg_big_30"}
+        fallback_map = {1: 105, 7: 656, 15: 1288, 30: 1563}
     else:
-        prices = {1: 105, 7: 490, 15: 720, 30: 938}
+        day_map = {1: "reg_small_1", 7: "reg_small_7", 15: "reg_small_15", 30: "reg_small_30"}
+        fallback_map = {1: 105, 7: 490, 15: 720, 30: 938}
         
-    return prices.get(days)
+    key = day_map.get(days)
+    return prices.get(key, fallback_map.get(days))
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
