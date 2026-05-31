@@ -1069,6 +1069,20 @@ def process_text(message):
         bot.register_next_step_handler(message, process_text)
         return
 
+    # 👇 ВРЕЗАЕМ НАШУ ТАМОЖНЮ (ФИЛЬТР СТОП-СЛОВ) СЮДА 👇
+    is_bad, trigger_word = check_stop_words(text)
+    if is_bad:
+        bot.send_message(
+            message.chat.id, 
+            f"❌ <b>Объявление отклонено!</b>\n\nСработал фильтр безопасности. В тексте найдено запрещенное слово/фраза: <b>{trigger_word}</b>\n\nПожалуйста, исправьте текст и отправьте его заново (ответом на это сообщение):", 
+            parse_mode="HTML"
+        )
+        # Зацикливаем юзера, пока он не пришлет нормальный текст
+        bot.register_next_step_handler(message, process_text)
+        return
+    # 👆 ================================================== 👆
+
+    # Если всё чисто — пропускаем дальше к публикации
     confirm_text(message, text, media_type, file_id)
 
 def confirm_text(message, text, media_type=None, file_id=None):
