@@ -7,6 +7,48 @@ import re
 import html
 from bson.objectid import ObjectId
 from urllib.parse import quote
+import requests
+
+# 👇 УНИВЕРСАЛЬНЫЙ КАССИР CRYPTOBOT (ДЛЯ РЕКЛАМЫ И ШТРАФОВ) 👇
+def get_crypto_pay_url(custom_payload, amount_stars, description, asset=None):
+    import os
+    import requests
+    
+    amount_rub = int(amount_stars * 1.8)
+    API_TOKEN = os.getenv("CRYPTO_TOKEN")
+    
+    if not API_TOKEN:
+        print("❌ ОШИБКА: Токен CRYPTO_TOKEN не найден!", flush=True)
+        return None
+
+    url = "https://pay.crypt.bot/api/createInvoice"
+    
+    headers = {
+        "Crypto-Pay-API-Token": API_TOKEN,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    payload = {
+        "currency_type": "fiat",
+        "fiat": "RUB",
+        "amount": str(amount_rub), 
+        "payload": custom_payload,
+        "description": description
+    }
+    
+    if asset:
+        payload["asset"] = asset
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        res = response.json()
+        
+        if res.get("ok"): 
+            return res["result"]["mini_app_invoice_url"] # 💥 Запускаем красивое Mini-App окно!
+    except Exception as e: 
+        print(f"❌ Ошибка связи с CryptoBot: {e}", flush=True)
+        
+    return None
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -1509,6 +1551,21 @@ def handle_ad_checkout(call):
             
         db['users'].update_one({"_id": call.from_user.id}, {"$unset": {"temp_promo": ""}})
     
+    # 👇 ГЕНЕРИРУЕМ КРИПТО-ССЫЛКИ (Приклеиваем ID юзера для Сервера) 👇
+    crypto_payload = f"{payload}___{call.from_user.id}"
+    url_usdt = get_crypto_pay_url(crypto_payload, amount, f"Реклама: {network} ({city})", asset="USDT")
+    url_ton = get_crypto_pay_url(crypto_payload, amount, f"Реклама: {network} ({city})", asset="TON")
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton(text=f"⭐️ Оплатить {amount} Звезд", pay=True)) # <- Кнопка Телеграма
+    
+    # Раздельные красивые кнопки
+    if url_usdt:
+        markup.add(types.InlineKeyboardButton("🟢 Оплатить через USDT (CryptoBot)", url=url_usdt))
+    if url_ton:
+        markup.add(types.InlineKeyboardButton("💎 Оплатить через TON (CryptoBot)", url=url_ton))
+    # 👆 ======================================================== 👆
+
     bot.send_invoice(
         call.message.chat.id, 
         title="Доступ + ЗАКРЕП 📌" if is_pin else "Доступ к публикации 📢", 
@@ -1516,7 +1573,8 @@ def handle_ad_checkout(call):
         invoice_payload=payload, 
         provider_token="", 
         currency="XTR", 
-        prices=[types.LabeledPrice(label="Рекламный доступ", amount=amount)]
+        prices=[types.LabeledPrice(label="Рекламный доступ", amount=amount)],
+        reply_markup=markup # <--- ДОБАВИЛИ НАШИ КНОПКИ В СЧЕТ
     )
 
 # --- ФОНОВЫЕ ЗАДАЧИ ---
