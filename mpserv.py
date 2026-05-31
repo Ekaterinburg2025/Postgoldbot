@@ -43,6 +43,33 @@ def escape_md(text):
         text = text.replace(ch, f"\\{ch}")
     return text
 
+# 👇 УМНЫЙ ФИЛЬТР СТОП-СЛОВ (КРАСНАЯ ЗОНА + ЧЕРНАЯ ЗОНА ИЗ ВЕБКИ) 👇
+def check_stop_words(text):
+    if not text: return False, None
+    text_lower = text.lower()
+    dict_data = db['settings'].find_one({"_id": "skynet_dictionary"}) or {}
+    
+    # 1. БАЗОВАЯ ПРОВЕРКА: Красная зона (Наркотики, жесть)
+    for w in dict_data.get("red", []):
+        pattern = w.get("pattern", rf"\b{w['word']}\b")
+        try:
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                return True, w['word']
+        except: pass
+
+    # 2. СПЕЦИАЛЬНЫЙ ФИЛЬТР РЕКЛАМЫ: Черная зона (Берем из Веб-панели!)
+    for w in dict_data.get("black", []):
+        # Используем гибкий поиск без \b, чтобы слово "вирт" ловило и "виртуальный"
+        pattern = w.get("pattern", rf"{w['word']}")
+        try:
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                match = re.search(pattern, text_lower, re.IGNORECASE)
+                return True, match.group(0)
+        except: pass
+
+    return False, None
+# 👆 ======================================================= 👆
+
 def escape_html(text):
     """
     Экранирует спецсимволы для HTML.
