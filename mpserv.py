@@ -1012,6 +1012,36 @@ def show_statistics_for_admin(chat_id):
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка отправки: <code>{escape_html(str(e))}</code>", parse_mode="HTML")
 
+# --- ВЕРНУВШИЕСЯ ПОМОЩНИКИ ---
+def get_network_markup():
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    markup.add(
+        "Мужской Клуб",
+        "ПАРНИ 18+",
+        "НС",
+        "Радуга",
+        "Гей Знакомства",
+        "Все сети",
+        "Назад"
+    )
+    return markup
+
+def normalize_network_key(name):
+    """Приводим название сети к ключу all_cities: mk, parni, ns, rainbow, gayznak"""
+    if name == "Мужской Клуб": return "mk"
+    elif name == "ПАРНИ 18+": return "parni"
+    elif name in ["НС", "Знакомства 66", "Знакомства 74"]: return "ns"
+    elif name == "Радуга": return "rainbow"
+    elif name == "Гей Знакомства": return "gayznak"
+    return None
+
+def get_user_html_link(user):
+    name = html.escape(user.first_name or "Без имени")
+    if user.last_name:
+        name += " " + html.escape(user.last_name)
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
+# -----------------------------
+
 @bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
 def create_new_post_category(message):
     if message.chat.type != "private": return
