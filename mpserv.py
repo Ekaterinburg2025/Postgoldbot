@@ -1558,15 +1558,30 @@ def process_ad_promo(message, network, city):
     net_key = network
     chat_id = all_cities[city][net_key][0]["chat_id"]
     
+    # --- Достаем VIP статус для наценки ---
+    user_data = db['users'].find_one({"_id": message.from_user.id})
+    is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
+    markup_multiplier = 1.5 if is_vip else 1.0
+
+    discount = promo_data["value"]
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    net_key = network
+    chat_id = all_cities[city][net_key][0]["chat_id"]
+    
     for days in [1, 7, 15, 30]:
         base_p = get_price_for_chat(chat_id, days)
         if base_p:
+            # Умножаем на 1.5 ДО применения скидки по промокоду
+            base_p = int(base_p * markup_multiplier)
+            
             f_price = int(base_p * (1 - discount / 100)) # Цена УЖЕ со скидкой
             pin_p = int(f_price * 1.2)
             
-            # Кнопки с полными названиями, без промокода внутри
+            btn_prefix = "🔥 VIP:" if is_vip else "💳"
+            
+            # Кнопки с правильными названиями и значками
             markup.row(
-                types.InlineKeyboardButton(f"💳 {days} дн. ({f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
+                types.InlineKeyboardButton(f"{btn_prefix} {days} дн. ({f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
                 types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{network}_{city}")
             )
             
