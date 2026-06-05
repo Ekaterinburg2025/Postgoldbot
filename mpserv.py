@@ -85,13 +85,13 @@ def escape_md(text):
         text = text.replace(ch, f"\\{ch}")
     return text
 
-# 👇 УМНЫЙ ФИЛЬТР СТОП-СЛОВ (КРАСНАЯ ЗОНА + ЧЕРНАЯ ЗОНА ИЗ ВЕБКИ) 👇
-def check_stop_words(text):
+# 👇 УМНЫЙ ФИЛЬТР СТОП-СЛОВ (КРАСНАЯ ЗОНА + ЧЕРНАЯ ЗОНА) 👇
+def check_stop_words(text, ignore_black_zone=False):
     if not text: return False, None
     text_lower = text.lower()
     dict_data = db['settings'].find_one({"_id": "skynet_dictionary"}) or {}
     
-    # 1. БАЗОВАЯ ПРОВЕРКА: Красная зона (Наркотики, жесть)
+    # 1. КРАСНАЯ ЗОНА (Проверяем ВСЕГДА у всех)
     for w in dict_data.get("red", []):
         pattern = w.get("pattern", rf"\b{w['word']}\b")
         try:
@@ -99,18 +99,17 @@ def check_stop_words(text):
                 return True, w['word']
         except: pass
 
-    # 2. СПЕЦИАЛЬНЫЙ ФИЛЬТР РЕКЛАМЫ: Черная зона (Берем из Веб-панели!)
-    for w in dict_data.get("black", []):
-        # Используем гибкий поиск без \b, чтобы слово "вирт" ловило и "виртуальный"
-        pattern = w.get("pattern", rf"{w['word']}")
-        try:
-            if re.search(pattern, text_lower, re.IGNORECASE):
-                match = re.search(pattern, text_lower, re.IGNORECASE)
-                return True, match.group(0)
-        except: pass
+    # 2. ЧЕРНАЯ ЗОНА (Пропускаем, если у юзера VIP-тариф)
+    if not ignore_black_zone:
+        for w in dict_data.get("black", []):
+            pattern = w.get("pattern", rf"{w['word']}")
+            try:
+                if re.search(pattern, text_lower, re.IGNORECASE):
+                    match = re.search(pattern, text_lower, re.IGNORECASE)
+                    return True, match.group(0)
+            except: pass
 
     return False, None
-# 👆 ======================================================= 👆
 
 def escape_html(text):
     """
@@ -596,6 +595,41 @@ def handle_change_duration_request(call):
     bot.send_message(call.message.chat.id, "Введите ID пользователя для изменения срока:")
     bot.register_next_step_handler(call.message, select_user_for_duration_change)
 
+# --- МОДЕРАЦИЯ VIP-РЕКЛАМЫ ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("vip_approve_") or call.data.startswith("vip_reject_"))
+def handle_vip_moderation(call):
+    action, _, user_id_str = call.data.split("_")
+    user_id = int(user_id_str)
+
+    if action == "approve":
+        # 1. Записываем юзеру VIP-статус для расчета цен
+        db['users'].update_one({"_id": user_id}, {"$set": {"temp_ad_type": "vip"}}, upsert=True)
+        
+        # 2. Пишем пользователю, что всё ок
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🚀 Выбрать сеть и оплатить", callback_data="start_vip_payment"))
+        try:
+            bot.send_message(user_id, "🎉 <b>Ваш ресурс успешно одобрен!</b>\nТеперь вы можете выбрать сеть, город и оплатить размещение (к прайсу применена наценка +50% за увод аудитории).\n\nЖмите кнопку ниже:", parse_mode="HTML", reply_markup=markup)
+        except: pass
+        
+        # 3. Обновляем сообщение у админа
+        bot.edit_message_text(f"{call.message.text}\n\n✅ <b>ОДОБРЕНО</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+    elif action == "reject":
+        # Убираем статус на всякий случай
+        db['users'].update_one({"_id": user_id}, {"$unset": {"temp_ad_type": ""}})
+        try:
+            bot.send_message(user_id, "❌ К сожалению, мы не можем разместить рекламу данного ресурса в нашей сети. Заявка отклонена.", reply_markup=get_main_keyboard())
+        except: pass
+        bot.edit_message_text(f"{call.message.text}\n\n❌ <b>ОТКЛОНЕНО</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+# --- СТАРТ ПОСЛЕ ОДОБРЕНИЯ ---
+@bot.callback_query_handler(func=lambda call: call.data == "start_vip_payment")
+def resume_vip_payment(call):
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+    bot.register_next_step_handler(call.message, select_network_step)
+
 @bot.callback_query_handler(func=lambda call: call.data == "admin_statistics")
 def handle_admin_statistics(call):
     show_statistics_for_admin(call.message.chat.id)
@@ -995,14 +1029,43 @@ def handle_category(message):
     if "Групп" in message.text:
         bot.send_message(
             message.chat.id, 
-            "Эксклюзив! 🎪\nДля расчета стоимости рекламы сообществ, Youtube-каналов и мероприятий обратитесь к нашему менеджеру: @FAQMKBOT выберите раздел реклама", 
-            reply_markup=get_main_keyboard()
+            "Отлично! 🎪 Но перед оплатой мы должны убедиться, что тематика вашего ресурса подходит для нашей сети.\n\n"
+            "Пожалуйста, отправьте ссылку на ваш канал/группу или @username:", 
+            reply_markup=types.ReplyKeyboardRemove()
         )
+        bot.register_next_step_handler(message, request_vip_approval)
         return
         
-    # НОВОЕ: Вместо текста сразу просим выбрать сеть!
+    # Если это обычное объявление — сохраняем статус "std" и идем дальше
+    db['users'].update_one({"_id": message.from_user.id}, {"$set": {"temp_ad_type": "std"}}, upsert=True)
     bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
     bot.register_next_step_handler(message, select_network_step)
+
+# НОВАЯ ФУНКЦИЯ: Принимаем ссылку и шлем админу
+def request_vip_approval(message):
+    if message.text in ["Назад", "/start"]:
+        bot.send_message(message.chat.id, "Главное меню", reply_markup=get_main_keyboard())
+        return
+        
+    link = message.text
+    user_id = message.from_user.id
+    user_name = escape_html(message.from_user.first_name)
+
+    # 1. Отправляем заявку Админу
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Одобрить", callback_data=f"vip_approve_{user_id}"),
+        types.InlineKeyboardButton("❌ Отклонить", callback_data=f"vip_reject_{user_id}")
+    )
+    bot.send_message(
+        ADMIN_CHAT_ID,
+        f"🚨 <b>Новая заявка на VIP-рекламу!</b>\n👤 Пользователь: <a href='tg://user?id={user_id}'>{user_name}</a> (<code>{user_id}</code>)\n🔗 Ссылка: {escape_html(link)}",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
+
+    # 2. Успокаиваем пользователя
+    bot.send_message(message.chat.id, "⏳ <b>Заявка отправлена на модерацию.</b>\nКак только администратор проверит ресурс, вы получите уведомление!", parse_mode="HTML", reply_markup=get_main_keyboard())
 
 def select_network_step(message):
     if message.text == "Назад":
@@ -1098,12 +1161,22 @@ def select_city_check_payment(message, selected_network):
         elif total_nets == 4: discount = 20
         elif total_nets >= 5: discount = 30
 
+        # --- Достаем VIP статус для наценки ---
+        user_data = db['users'].find_one({"_id": user_id})
+        is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
+        markup_multiplier = 1.5 if is_vip else 1.0 # 👈 НАЦЕНКА +50%
+
         for days in [1, 7, 15, 30]:
             base_p = get_price_for_chat(chat_id, days)
             if base_p:
+                # Умножаем на 1.5 ДО применения скидок за мульти-сеть
+                base_p = int(base_p * markup_multiplier)
+                
                 f_price = int((base_p * buying_now) * (1 - discount / 100))
                 pin_p = int(f_price * 1.2)
-                btn_t = f"🔥 {days} дн. (-{discount}% за {f_price}⭐️)" if discount > 0 else f"💳 {days} дн. ({f_price}⭐️)"
+                
+                btn_prefix = "🔥 VIP:" if is_vip else "💳"
+                btn_t = f"{btn_prefix} {days} дн. (-{discount}% за {f_price}⭐️)" if discount > 0 else f"{btn_prefix} {days} дн. ({f_price}⭐️)"
                 
                 markup.row(
                     types.InlineKeyboardButton(btn_t, callback_data=f"ad_pay_{days}_{net_key}_{city}"),
@@ -1146,7 +1219,13 @@ def process_text_step(message, selected_network, city):
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
 
-    is_bad, trigger_word = check_stop_words(text)
+    # Проверяем, есть ли у юзера право на ссылки в активной подписке
+    sub = ad_subs_collection.find_one({"user_id": message.from_user.id, "city": city, "network": {"$in": ["Все сети", selected_network]}, "end_date": {"$gt": now_ekb()}})
+    can_post_links = sub.get("can_post_links", False) if sub else False
+
+    # Передаем это право в фильтр стоп-слов!
+    is_bad, trigger_word = check_stop_words(text, ignore_black_zone=can_post_links)
+    
     if is_bad:
         bot.send_message(message.chat.id, f"❌ <b>Объявление отклонено!</b>\n\nВ тексте найдено запрещенное слово: <b>{trigger_word}</b>\n\nИсправьте текст и отправьте заново:", parse_mode="HTML")
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
@@ -1375,6 +1454,9 @@ def successful_payment(message):
 
         end_date = now_ekb() + timedelta(days=days)
 
+        # Проверяем, была ли это VIP-оплата
+        is_vip = "_vip_" in payload
+
         # 💥 ЗАПИСЬ В БАЗУ ДАННЫХ
         ad_subs_collection.insert_one({
             "user_id": user_id,
@@ -1383,11 +1465,14 @@ def successful_payment(message):
             "end_date": end_date,
             "purchase_date": now_ekb(),
             "has_pin": has_pin,
-            # 👇 НОВЫЕ ФЛАГИ-ГЛУШИТЕЛИ 👇
+            "can_post_links": is_vip, # 👈 Автоматически разрешаем ссылки для VIP!
             "notified_72h": True if days <= 3 else False,
             "notified_24h": True if days <= 1 else False,
             "notified_3h": False
         })
+        
+        # Сбрасываем временный статус, чтобы следующая покупка не была с наценкой
+        db['users'].update_one({"_id": user_id}, {"$unset": {"temp_ad_type": ""}})
 
         # Уведомление админу
         try:
@@ -1485,7 +1570,6 @@ def handle_renew_request(call):
         parse_mode="HTML"
     )
 
-# ================= КАССА (ОБЩАЯ ДЛЯ ВСЕХ) =================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ad_pay_') or call.data.startswith('ad_paypin_'))
 def handle_ad_checkout(call):
     bot.answer_callback_query(call.id)
@@ -1502,12 +1586,20 @@ def handle_ad_checkout(call):
 
     chat_id = all_cities[city][net_key][0]["chat_id"]
     base_price = get_price_for_chat(chat_id, days)
+    
+    # --- VIP Наценка ---
+    user_data = db['users'].find_one({"_id": call.from_user.id})
+    is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
+    temp_promo = user_data.get("temp_promo") if user_data else None
+
+    if is_vip:
+        base_price = int(base_price * 1.5) # Применяем 1.5 к итоговому счету
+
     amount = int(base_price * 1.2) if is_pin else base_price
     
-    user_data = db['users'].find_one({"_id": call.from_user.id})
-    temp_promo = user_data.get("temp_promo") if user_data else None
-    
-    payload = f"ad_access_discount_{days}_{net_key}_{city}_{temp_promo}" if temp_promo else f"ad_access_{days}_{net_key}_{city}"
+    # --- Вшиваем VIP метку в payload ---
+    payload_base = "ad_access_vip" if is_vip else "ad_access"
+    payload = f"{payload_base}_discount_{days}_{net_key}_{city}_{temp_promo}" if temp_promo else f"{payload_base}_{days}_{net_key}_{city}"
     if is_pin: payload += "_pin"
     
     description_text = f"Сеть: {network}\nГород: {city}\nСрок: {days} дн."
@@ -1521,20 +1613,18 @@ def handle_ad_checkout(call):
             
         db['users'].update_one({"_id": call.from_user.id}, {"$unset": {"temp_promo": ""}})
     
-    # 👇 ГЕНЕРИРУЕМ КРИПТО-ССЫЛКИ (Приклеиваем ID юзера для Сервера) 👇
+    # 👇 ГЕНЕРИРУЕМ КРИПТО-ССЫЛКИ 👇
     crypto_payload = f"{payload}___{call.from_user.id}"
     url_usdt = get_crypto_pay_url(crypto_payload, amount, f"Реклама: {network} ({city})", asset="USDT")
     url_ton = get_crypto_pay_url(crypto_payload, amount, f"Реклама: {network} ({city})", asset="TON")
 
     markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(types.InlineKeyboardButton(text=f"⭐️ Оплатить {amount} Звезд", pay=True)) # <- Кнопка Телеграма
+    markup.add(types.InlineKeyboardButton(text=f"⭐️ Оплатить {amount} Звезд", pay=True))
     
-    # Раздельные красивые кнопки
     if url_usdt:
         markup.add(types.InlineKeyboardButton("🟢 Оплатить через USDT (CryptoBot)", url=url_usdt))
     if url_ton:
         markup.add(types.InlineKeyboardButton("💎 Оплатить через TON (CryptoBot)", url=url_ton))
-    # 👆 ======================================================== 👆
 
     bot.send_invoice(
         call.message.chat.id, 
@@ -1544,10 +1634,9 @@ def handle_ad_checkout(call):
         provider_token="", 
         currency="XTR", 
         prices=[types.LabeledPrice(label="Рекламный доступ", amount=amount)],
-        reply_markup=markup # <--- ДОБАВИЛИ НАШИ КНОПКИ В СЧЕТ
+        reply_markup=markup
     )
 
-# --- ФОНОВЫЕ ЗАДАЧИ ---
 # --- ФОНОВЫЕ ЗАДАЧИ ---
 def check_expiring_subs():
     """Фоновая задача: ищет подписки, истекающие через 72, 24 и 3 часа"""
