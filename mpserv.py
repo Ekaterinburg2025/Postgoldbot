@@ -441,13 +441,18 @@ def select_duration_for_payment(message, user_id, network, city):
 
     expiry_date = now_ekb() + timedelta(days=days)
 
-    # 💥 ЗАПИСЬ В MONGODB ВМЕСТО СТАРОГО СЛОВАРЯ
+    # 💥 ЗАПИСЬ В БАЗУ ДАННЫХ
     ad_subs_collection.insert_one({
         "user_id": user_id,
         "network": network,
         "city": city,
-        "end_date": expiry_date,
-        "purchase_date": now_ekb()
+        "end_date": expiry_date, # <-- Исправлено на expiry_date
+        "purchase_date": now_ekb(),
+        "has_pin": False,        # <-- При ручной выдаче закреп по умолчанию выключен
+        # 👇 НОВЫЕ ФЛАГИ-ГЛУШИТЕЛИ 👇
+        "notified_72h": True if days <= 3 else False,
+        "notified_24h": True if days <= 1 else False,
+        "notified_3h": False
     })
 
     try:
@@ -862,7 +867,11 @@ def handle_manage_sub_selection(call):
                types.InlineKeyboardButton("-1 неделя", callback_data=f"change_duration_{sub_id}_-7"),
                types.InlineKeyboardButton("-1 месяц", callback_data=f"change_duration_{sub_id}_-30"))
     
-    bot.edit_message_text("⏳ Выберите, на сколько изменить срок выбранной подписки:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    # 👇 НОВЫЕ КНОПКИ ДЛЯ ССЫЛОК 👇
+    markup.add(types.InlineKeyboardButton("✅ Разрешить ссылки", callback_data=f"allow_links_{sub_id}"),
+               types.InlineKeyboardButton("❌ Запретить ссылки", callback_data=f"deny_links_{sub_id}"))
+    
+    bot.edit_message_text("⏳ Выберите действие для выбранной подписки:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 # --- 3. Физическое применение изменений в MongoDB ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("change_duration_"))
@@ -900,6 +909,26 @@ def handle_duration_change(call):
     except Exception as e:
         print(f"Ошибка в handle_duration_change: {e}")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка при изменении срока.")
+
+# --- Выдача и отзыв прав на ссылки для конкретной подписки ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("allow_links_") or call.data.startswith("deny_links_"))
+def handle_links_permission(call):
+    action, _, sub_id = call.data.split("_")
+    
+    # Определяем, выдаем или забираем права
+    is_allowed = (action == "allow")
+    
+    # Обновляем конкретную подписку в MongoDB
+    result = ad_subs_collection.update_one(
+        {"_id": ObjectId(sub_id)}, 
+        {"$set": {"can_post_links": is_allowed}}
+    )
+    
+    if result.modified_count > 0:
+        status_text = "✅ Разрешение на публикацию ссылок ВЫДАНО!" if is_allowed else "🚫 Разрешение на ссылки ОТОЗВАНО."
+        bot.answer_callback_query(call.id, status_text, show_alert=True)
+    else:
+        bot.answer_callback_query(call.id, "⚠️ Подписка уже имеет этот статус или не найдена.")
 
 @bot.message_handler(commands=['statistics'])
 def show_statistics_for_admin(chat_id):
@@ -971,82 +1000,130 @@ def handle_category(message):
         )
         return
         
-    bot.send_message(message.chat.id, "Напишите текст объявления (без ссылок на другие каналы):", reply_markup=types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(message, process_text)
+    # НОВОЕ: Вместо текста сразу просим выбрать сеть!
+    bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+    bot.register_next_step_handler(message, select_network_step)
 
-@bot.message_handler(func=lambda message: message.text == "Удалить объявление")
-def handle_delete_post(message):
-    if message.chat.type != "private": return
-    
-    # ИЩЕМ ПОСТЫ В MONGODB (только активные)
-    user_id = message.from_user.id
-    posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}))
-    
-    if posts:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        for post in posts:
-            time_formatted = format_time(post["time"])
-            button_text = f"Удалить: {time_formatted}, {post['city']}, {post['network']}"
-            markup.add(button_text)
-        markup.add("Отмена")
-        bot.send_message(message.chat.id, "Выберите объявление для удаления:", reply_markup=markup)
-        bot.register_next_step_handler(message, process_delete_choice, posts)
-    else:
-        bot.send_message(message.chat.id, "❌ У вас нет активных опубликованных объявлений.")
-
-def process_delete_choice(message, posts):
-    if message.text == "Отмена":
-        bot.send_message(message.chat.id, "Удаление отменено.", reply_markup=get_main_keyboard())
+def select_network_step(message):
+    if message.text == "Назад":
+        # Возвращаем на шаг назад к выбору категории
+        create_new_post_category(message)
         return
 
-    for post in posts:
-        time_formatted = format_time(post["time"])
-        if message.text == f"Удалить: {time_formatted}, {post['city']}, {post['network']}":
-            try:
-                bot.delete_message(post["chat_id"], post["message_id"])
-            except: pass
+    selected_network = message.text.strip()
+    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства", "Все сети"]
 
-            # Помечаем пост как удаленный в MONGODB
-            ad_posts_collection.update_one(
-                {"_id": post["_id"]}, 
-                {"$set": {"deleted": True, "deleted_by": "Пользователь"}}
-            )
-            bot.send_message(message.chat.id, "✅ Объявление успешно удалено.", reply_markup=get_main_keyboard())
-            return
-            
-    bot.send_message(message.chat.id, "❌ Ошибка! Пожалуйста, выберите объявление из списка.")
+    if selected_network in valid_networks:
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
 
-@bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
-def handle_delete_all_posts(message):
-    if message.chat.type != "private": return
-    
+        if selected_network == "Все сети":
+            cities = [city for city, nets in all_cities.items() if len(nets) >= 2]
+        else:
+            key = normalize_network_key(selected_network)
+            cities = [city for city, nets in all_cities.items() if key in nets]
+
+        for city in cities:
+            markup.add(city)
+        markup.add("Выбрать другую сеть", "Назад")
+
+        bot.send_message(
+            message.chat.id,
+            "📍 <b>Выберите город</b> для публикации или нажмите «<i>Выбрать другую сеть</i>»:",
+            reply_markup=markup,
+            parse_mode="HTML"
+        )
+        # Передаем эстафету функции проверки оплаты
+        bot.register_next_step_handler(message, select_city_check_payment, selected_network)
+    else:
+        bot.send_message(message.chat.id, "❌ Ошибка! Пожалуйста, выберите одну из предложенных сетей.", parse_mode="HTML")
+        bot.register_next_step_handler(message, select_network_step)
+
+def select_city_check_payment(message, selected_network):
+    if message.text == "Назад" or message.text == "Выбрать другую сеть":
+        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
+        bot.register_next_step_handler(message, select_network_step)
+        return
+
+    city = message.text
     user_id = message.from_user.id
-    posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}))
-    
-    if posts:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        markup.add("Да, удалить всё", "Нет, отменить")
-        bot.send_message(message.chat.id, "Вы уверены, что хотите удалить все свои активные объявления?", reply_markup=markup)
-        bot.register_next_step_handler(message, process_delete_all_choice)
-    else:
-        bot.send_message(message.chat.id, "❌ У вас нет опубликованных объявлений.")
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if selected_network == "Все сети" else [selected_network]
 
-def process_delete_all_choice(message):
-    if message.text == "Да, удалить всё":
-        user_id = message.from_user.id
-        posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}))
+    # --- ПРОВЕРКА ОПЛАТЫ НА ВХОДЕ ---
+    has_access = False
+    for network in networks:
+        net_key = normalize_network_key(network)
+        if all_cities.get(city, {}).get(net_key) and is_user_paid(user_id, network, city):
+            has_access = True
+            break
+
+    if not has_access:
+        # ВЫВОДИМ ПЕЙВОЛ (Логика из старой функции)
+        network = networks[0] # Берем первую для расчета
+        net_key = normalize_network_key(network)
         
-        for post in posts:
-            try: bot.delete_message(post["chat_id"], post["message_id"])
-            except: pass
-            
-            ad_posts_collection.update_one({"_id": post["_id"]}, {"$set": {"deleted": True, "deleted_by": "Пользователь"}})
+        # Если вдруг выбранного города нет в этой сети, ищем первую подходящую
+        if not all_cities.get(city, {}).get(net_key):
+            for n in networks:
+                if all_cities.get(city, {}).get(normalize_network_key(n)):
+                    network = n
+                    net_key = normalize_network_key(n)
+                    break
 
-        bot.send_message(message.chat.id, "✅ Все ваши объявления успешно удалены.", reply_markup=get_main_keyboard())
-    else:
-        bot.send_message(message.chat.id, "Удаление отменено.", reply_markup=get_main_keyboard())
+        chat_id = all_cities[city][net_key][0]["chat_id"]
+        
+        cheap_stars_text = (
+            "<b>💡 Лайфхак: Как купить звёзды ДЕШЕВЛЕ официального курса?</b>\n\n"
+            "Перед оплатой рекомендуем приобрести звёзды через проверенный сервис. "
+            "Это выйдет значительно выгоднее, чем покупать их напрямую через Telegram.\n\n"
+            "<b>Инструкция:</b>\n"
+            "1️⃣ Перейти: <a href='https://t.me/Avrrorkastarbot?start=7924963993'>Купить звезды дешево</a>\n"
+            "2️⃣ Нажать кнопку «⭐️ Купить звезды»\n"
+            "3️⃣ Выбрать пункт «👤 Себе»\n"
+            "4️⃣ Выбрать пакет звезд для вашего тарифа\n"
+            "5️⃣ Оплатите удобным способом\n\n"
+            "После покупки возвращайтесь сюда и выбирайте тариф ниже! 👇"
+        )
+        try: bot.send_message(message.chat.id, cheap_stars_text, parse_mode="HTML", disable_web_page_preview=True)
+        except: pass
 
-def process_text(message):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎫 У меня есть промокод", callback_data=f"ad_promo_{net_key}_{city}"))
+        
+        active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": user_id, "city": city, "end_date": {"$gt": now_ekb()}}))
+        buying_now = (len([n for n, d in all_cities[city].items() if d]) - active_subs_count) if selected_network == "Все сети" else 1
+        total_nets = (active_subs_count + buying_now)
+        
+        discount = 0
+        if total_nets == 3: discount = 10
+        elif total_nets == 4: discount = 20
+        elif total_nets >= 5: discount = 30
+
+        for days in [1, 7, 15, 30]:
+            base_p = get_price_for_chat(chat_id, days)
+            if base_p:
+                f_price = int((base_p * buying_now) * (1 - discount / 100))
+                pin_p = int(f_price * 1.2)
+                btn_t = f"🔥 {days} дн. (-{discount}% за {f_price}⭐️)" if discount > 0 else f"💳 {days} дн. ({f_price}⭐️)"
+                
+                markup.row(
+                    types.InlineKeyboardButton(btn_t, callback_data=f"ad_pay_{days}_{net_key}_{city}"),
+                    types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{net_key}_{city}")
+                )
+
+        bot.send_message(
+            message.chat.id,
+            f"⛔ У вас нет доступа к публикации в <b>{escape_html(selected_network)}</b> ({escape_html(city)}).\n\nПриобретите доступ:",
+            reply_markup=markup,
+            parse_mode="HTML"
+        )
+        log_failed_attempt(user_id, selected_network, city, "Нет доступа")
+        return # Останавливаем процесс, ждем оплату
+
+    # ЕСЛИ ОПЛАТА ЕСТЬ — ИДЕМ ДАЛЬШЕ И ПРОСИМ ТЕКСТ
+    bot.send_message(message.chat.id, f"✅ Доступ подтверждён!\n\nНапишите текст объявления для <b>{selected_network} ({city})</b>:", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(message, process_text_step, selected_network, city)
+
+def process_text_step(message, selected_network, city):
     if message.text == "Назад":
         bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
@@ -1066,218 +1143,65 @@ def process_text(message):
         text = message.text
     else:
         bot.send_message(message.chat.id, "❌ Ошибка! Отправьте текст, фото или видео.")
-        bot.register_next_step_handler(message, process_text)
+        bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
 
-    # 👇 ВРЕЗАЕМ НАШУ ТАМОЖНЮ (ФИЛЬТР СТОП-СЛОВ) СЮДА 👇
     is_bad, trigger_word = check_stop_words(text)
     if is_bad:
-        bot.send_message(
-            message.chat.id, 
-            f"❌ <b>Объявление отклонено!</b>\n\nСработал фильтр безопасности. В тексте найдено запрещенное слово/фраза: <b>{trigger_word}</b>\n\nПожалуйста, исправьте текст и отправьте его заново (ответом на это сообщение):", 
-            parse_mode="HTML"
-        )
-        # Зацикливаем юзера, пока он не пришлет нормальный текст
-        bot.register_next_step_handler(message, process_text)
+        bot.send_message(message.chat.id, f"❌ <b>Объявление отклонено!</b>\n\nВ тексте найдено запрещенное слово: <b>{trigger_word}</b>\n\nИсправьте текст и отправьте заново:", parse_mode="HTML")
+        bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
-    # 👆 ================================================== 👆
 
-    # Если всё чисто — пропускаем дальше к публикации
-    confirm_text(message, text, media_type, file_id)
-
-def confirm_text(message, text, media_type=None, file_id=None):
+    # Подтверждение
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да", "Нет")
+    markup.add("Да, опубликовать", "Нет, изменить текст")
     bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
+    bot.register_next_step_handler(message, handle_confirmation_step, text, media_type, file_id, selected_network, city)
 
-def handle_confirmation(message, text, media_type, file_id):
-    if message.text.lower() == "да":
-        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
-    elif message.text.lower() == "нет":
+def handle_confirmation_step(message, text, media_type, file_id, selected_network, city):
+    if message.text.lower() == "нет, изменить текст":
         bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
-        bot.register_next_step_handler(message, process_text)
-    else:
-        bot.send_message(message.chat.id, "❌ Неверный ответ. Выберите 'Да' или 'Нет'.")
-        bot.register_next_step_handler(message, handle_confirmation, text, media_type, file_id)
-
-def get_network_markup():
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add(
-        "Мужской Клуб",
-        "ПАРНИ 18+",
-        "НС",
-        "Радуга",
-        "Гей Знакомства",
-        "Все сети",
-        "Назад"
-    )
-    return markup
-
-def normalize_network_key(name):
-    """Приводим название сети к ключу all_cities: mk, parni, ns, rainbow, gayznak"""
-    if name == "Мужской Клуб":
-        return "mk"
-    elif name == "ПАРНИ 18+":
-        return "parni"
-    elif name in ["НС", "Знакомства 66", "Знакомства 74"]:
-        return "ns"
-    elif name == "Радуга":
-        return "rainbow"
-    elif name == "Гей Знакомства":
-        return "gayznak"
-    return None
-
-def select_network(message, text, media_type, file_id):
-    if message.text == "Назад":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
-        bot.register_next_step_handler(message, process_text)
-        return
-
-    selected_network = message.text.strip()
-    valid_networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства", "Все сети"]
-
-    if selected_network in valid_networks:
-        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=2)
-
-        if selected_network == "Все сети":
-            # Только города, которые есть минимум в 2 сетях
-            cities = [city for city, nets in all_cities.items() if len(nets) >= 2]
-        else:
-            key = normalize_network_key(selected_network)
-            cities = [city for city, nets in all_cities.items() if key in nets]
-
-        for city in cities:
-            markup.add(city)
-        markup.add("Выбрать другую сеть", "Назад")
-
-        bot.send_message(
-            message.chat.id,
-            "📍 <b>Выберите город</b> для публикации или нажмите «<i>Выбрать другую сеть</i>»:",
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
-        bot.register_next_step_handler(message, select_city_and_publish, text, selected_network, media_type, file_id)
-    else:
-        bot.send_message(
-            message.chat.id,
-            "❌ <b>Ошибка!</b> Пожалуйста, выберите одну из предложенных сетей.",
-            parse_mode="HTML"
-        )
-        bot.register_next_step_handler(message, process_text)
-
-def get_user_html_link(user):
-    name = html.escape(user.first_name or "Без имени")
-    if user.last_name:
-        name += " " + html.escape(user.last_name)
-    return f'<a href="tg://user?id={user.id}">{name}</a>'
-
-def select_city_and_publish(message, text, selected_network, media_type, file_id):
-    if message.text == "Назад":
-        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
-        return
-
-    city = message.text
-    if city == "Выбрать другую сеть":
-        bot.send_message(message.chat.id, "📋 Выберите сеть для публикации:", reply_markup=get_network_markup())
-        bot.register_next_step_handler(message, select_network, text, media_type, file_id)
+        bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
 
     user_id = message.from_user.id
     user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
     text = escape_html(text)
-
-    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства",] if selected_network == "Все сети" else [selected_network]
+    networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if selected_network == "Все сети" else [selected_network]
 
     was_published = False
-    offered_payment = False 
 
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
 
-        if not city_data:
-            continue
+        if not city_data: continue
 
-        if not is_user_paid(user_id, network, city):
-            log_failed_attempt(user_id, network, city, "Нет доступа")
-            
-            if not offered_payment:
-                offered_payment = True
-                chat_id = city_data[0]["chat_id"]
-                
-                # --- ЛАЙФХАК ---
-                cheap_stars_text = (
-                    "<b>💡 Лайфхак: Как купить звёзды ДЕШЕВЛЕ официального курса?</b>\n\n"
-                    "Перед оплатой рекомендуем приобрести звёзды через проверенный сервис. "
-                    "Это выйдет значительно выгоднее, чем покупать их напрямую через Telegram.\n\n"
-                    "<b>Инструкция:</b>\n"
-                    "1️⃣ Перейти: <a href='https://t.me/Avrrorkastarbot?start=7924963993'>Купить звезды дешево</a>\n"
-                    "2️⃣ Нажать кнопку «⭐️ Купить звезды»\n"
-                    "3️⃣ Выбрать пункт «👤 Себе»\n"
-                    "4️⃣ Выбрать пакет звезд для вашего тарифа\n"
-                    "5️⃣ Оплатите удобным способом\n\n"
-                    "После покупки возвращайтесь сюда и выбирайте тариф ниже! 👇"
-                )
-                try: bot.send_message(message.chat.id, cheap_stars_text, parse_mode="HTML", disable_web_page_preview=True)
-                except: pass
-
-                # --- КНОПКИ (В скрытой части кнопок используем net_key для обхода лимитов Телеграма!) ---
-                markup = types.InlineKeyboardMarkup(row_width=1)
-                markup.add(types.InlineKeyboardButton("🎫 У меня есть промокод", callback_data=f"ad_promo_{net_key}_{city}"))
-                
-                active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": user_id, "city": city, "end_date": {"$gt": now_ekb()}}))
-                buying_now = (len([n for n, d in all_cities[city].items() if d]) - active_subs_count) if selected_network == "Все сети" else 1
-                total_nets = (active_subs_count + buying_now)
-                
-                discount = 0
-                if total_nets == 3: discount = 10
-                elif total_nets == 4: discount = 20
-                elif total_nets >= 5: discount = 30
-
-                for days in [1, 7, 15, 30]:
-                    base_p = get_price_for_chat(chat_id, days)
-                    if base_p:
-                        f_price = int((base_p * buying_now) * (1 - discount / 100))
-                        pin_p = int(f_price * 1.2)
-                        btn_t = f"🔥 {days} дн. (-{discount}% за {f_price}⭐️)" if discount > 0 else f"💳 {days} дн. ({f_price}⭐️)"
-                        
-                        markup.row(
-                            types.InlineKeyboardButton(btn_t, callback_data=f"ad_pay_{days}_{net_key}_{city}"),
-                            types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{net_key}_{city}")
-                        )
-
-                bot.send_message(
-                    message.chat.id,
-                    f"⛔ У вас нет доступа к публикации в <b>{escape_html(network)}</b> ({escape_html(city)}).\n\nПриобретите доступ:",
-                    reply_markup=markup,
-                    parse_mode="HTML"
-                )
-                break # 🛑 Прерываем цикл, чтобы юзер сначала оплатил, а не получал спам!
-
-        # --- ЛОГИКА ПУБЛИКАЦИИ ---
-        has_links = bool(re.search(r'(t\.me/|@\w+|http)', text.lower()))
-        if has_links:
-            bot.send_message(message.chat.id, "❌ Ссылки и @username запрещены! Уберите их из текста.")
-            ask_for_new_post(message)
-            return
-
+        # --- Проверка лимитов ---
         user_stats = get_user_statistics(user_id)
         city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
 
         if city_stats.get("remaining", 0) <= 0:
-            bot.send_message(message.chat.id, f"⛔ Лимит публикаций исчерпан для <b>{escape_html(network)}</b> ({escape_html(city)})", parse_mode="HTML")
+            bot.send_message(message.chat.id, f"⛔ Лимит публикаций на сегодня исчерпан для <b>{escape_html(network)}</b> ({escape_html(city)})", parse_mode="HTML")
             continue
 
+        # --- Проверка на ссылки (Наша новая логика) ---
+        sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети", network]}, "end_date": {"$gt": now_ekb()}})
+        can_post_links = sub.get("can_post_links", False) if sub else False
+
+        if not can_post_links:
+            has_links = bool(re.search(r'(t\.me/|@\w+|http)', text.lower()))
+            if has_links:
+                bot.send_message(message.chat.id, "❌ Ссылки и @username запрещены! Уберите их из текста.")
+                ask_for_new_post(message)
+                return
+
+        # --- Публикация ---
         signature = network_signatures.get(network, "")
         full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
         
         reply_markup = types.InlineKeyboardMarkup()
-        reply_markup.add(
-            types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114")
-        )
+        reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
 
         for location in city_data:
             chat_id = location["chat_id"]
@@ -1290,7 +1214,6 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
                 bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
                 was_published = True
 
-                sub = ad_subs_collection.find_one({"user_id": user_id, "city": location['name'], "network": {"$in": ["Все сети", network]}, "end_date": {"$gt": now_ekb()}})
                 if sub and sub.get("has_pin"):
                     try: bot.pin_chat_message(chat_id, sent_msg.message_id, disable_notification=True)
                     except: pass
@@ -1298,19 +1221,12 @@ def select_city_and_publish(message, text, selected_network, media_type, file_id
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
 
-    # Предлагаем новый пост ТОЛЬКО если мы не отправляли меню оплаты
-    if not offered_payment:
-        if not was_published:
-            markup = types.InlineKeyboardMarkup()
-            url = "https://t.me/FAQMKBOT" if selected_network == "Мужской Клуб" else "https://t.me/FAQZNAKBOT"
-            markup.add(types.InlineKeyboardButton(text="Купить рекламу", url=url, style="danger", icon_custom_emoji_id="5420315771991497307"))
-            bot.send_message(message.chat.id, "⛔ У вас нет прав на публикацию в этой сети/городе.", reply_markup=markup)
-        ask_for_new_post(message)
+    ask_for_new_post(message)
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
     markup.add("Да", "Нет")
-    bot.send_message(message.chat.id, "Хотите опубликовать ещё одно объявление?", reply_markup=markup)
+    bot.send_message(message.chat.id, "Хотите создать ещё одно объявление?", reply_markup=markup)
     bot.register_next_step_handler(message, handle_new_post_choice)
 
 def handle_new_post_choice(message):
@@ -1462,11 +1378,15 @@ def successful_payment(message):
         # 💥 ЗАПИСЬ В БАЗУ ДАННЫХ
         ad_subs_collection.insert_one({
             "user_id": user_id,
-            "network": network, # Теперь в базу пойдет "Мужской Клуб"
+            "network": network,
             "city": city,
             "end_date": end_date,
             "purchase_date": now_ekb(),
-            "has_pin": has_pin 
+            "has_pin": has_pin,
+            # 👇 НОВЫЕ ФЛАГИ-ГЛУШИТЕЛИ 👇
+            "notified_72h": True if days <= 3 else False,
+            "notified_24h": True if days <= 1 else False,
+            "notified_3h": False
         })
 
         # Уведомление админу
@@ -1476,7 +1396,7 @@ def successful_payment(message):
 
         # Сообщение юзеру
         try:
-            bot.send_message(user_id, f"✅ **Оплата успешно получена!**\n\nДоступ к сети **{network}** ({city}) открыт на {days} дней.\nНажмите «Создать новое объявление».", parse_mode="Markdown")
+            bot.send_message(user_id, f"✅ <b>Оплата успешно получена!</b>\n\nДоступ к сети <b>{network}</b> ({city}) открыт на {days} дней.\nЖмите кнопку ниже, чтобы разместить пост!", parse_mode="HTML", reply_markup=get_main_keyboard())
         except: pass
 
 # ================= ПРОМОКОДЫ ДЛЯ РЕКЛАМЫ =================
@@ -1528,6 +1448,42 @@ def process_ad_promo(message, network, city):
             )
             
     bot.send_message(message.chat.id, f"✅ <b>Промокод применен!</b> Выберите тариф:", reply_markup=markup, parse_mode="HTML")
+
+# --- БЫСТРОЕ ПРОДЛЕНИЕ ИЗ УВЕДОМЛЕНИЙ ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("renew_"))
+def handle_renew_request(call):
+    parts = call.data.split('_')
+    net_key = parts[1]
+    city = parts[2]
+
+    names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
+    network = names.get(net_key, net_key)
+
+    try:
+        chat_id = all_cities[city][net_key][0]["chat_id"]
+    except KeyError:
+        bot.answer_callback_query(call.id, "❌ Ошибка: Город или сеть больше не существуют.")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+
+    # Достаем актуальные цены и генерируем кнопки оплаты
+    for days in [1, 7, 15, 30]:
+        base_price = get_price_for_chat(chat_id, days)
+        if base_price:
+            pin_price = int(base_price * 1.2)
+            markup.row(
+                types.InlineKeyboardButton(f"💳 {days} дн. ({base_price}⭐️)", callback_data=f"ad_pay_{days}_{net_key}_{city}"),
+                types.InlineKeyboardButton(f"📌 +Закреп ({pin_price}⭐️)", callback_data=f"ad_paypin_{days}_{net_key}_{city}")
+            )
+
+    bot.edit_message_text(
+        f"♻️ <b>Продление рекламы:</b> {network} ({city})\n\nВыберите новый тарифный план:",
+        call.message.chat.id, 
+        call.message.message_id, 
+        reply_markup=markup, 
+        parse_mode="HTML"
+    )
 
 # ================= КАССА (ОБЩАЯ ДЛЯ ВСЕХ) =================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ad_pay_') or call.data.startswith('ad_paypin_'))
@@ -1592,37 +1548,50 @@ def handle_ad_checkout(call):
     )
 
 # --- ФОНОВЫЕ ЗАДАЧИ ---
+# --- ФОНОВЫЕ ЗАДАЧИ ---
 def check_expiring_subs():
-    """Фоновая задача: ищет подписки, истекающие через 72 и 24 часа"""
+    """Фоновая задача: ищет подписки, истекающие через 72, 24 и 3 часа"""
+    reverse_names = {"Мужской Клуб": "mk", "ПАРНИ 18+": "parni", "НС": "ns", "Радуга": "rainbow", "Гей Знакомства": "gayznak"}
+
     while True:
         try:
             now = now_ekb()
             
+            # --- Функция генерации кнопки продления ---
+            def get_renew_markup(network_name, city):
+                net_key = reverse_names.get(network_name, "mk")
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("♻️ Продлить подписку", callback_data=f"renew_{net_key}_{city}"))
+                return markup
+
             # 1. Проверка за 72 часа (3 дня)
             target_72 = now + timedelta(hours=72)
-            expiring_72 = ad_subs_collection.find({
-                "end_date": {"$gte": target_72 - timedelta(hours=1), "$lte": target_72 + timedelta(hours=1)},
-                "notified_72h": {"$ne": True}
-            })
+            expiring_72 = ad_subs_collection.find({"end_date": {"$gte": target_72 - timedelta(hours=1), "$lte": target_72 + timedelta(hours=1)}, "notified_72h": {"$ne": True}})
             for sub in expiring_72:
                 try:
-                    bot.send_message(sub['user_id'], f"⏳ <b>Мягкое напоминание:</b>\nВаша подписка на <b>{sub['network']}</b> ({sub['city']}) истекает через 3 дня.\nПодготовьтесь к продлению, чтобы не потерять клиентов!", parse_mode="HTML")
+                    bot.send_message(sub['user_id'], f"⏳ <b>Мягкое напоминание:</b>\nВаша подписка на <b>{sub['network']}</b> ({sub['city']}) истекает через 3 дня.\nПодготовьтесь к продлению, чтобы не терять клиентов!", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
                     ad_subs_collection.update_one({"_id": sub["_id"]}, {"$set": {"notified_72h": True}})
                 except: pass
 
             # 2. Проверка за 24 часа
             target_24 = now + timedelta(hours=24)
-            expiring_24 = ad_subs_collection.find({
-                "end_date": {"$gte": target_24 - timedelta(hours=1), "$lte": target_24 + timedelta(hours=1)},
-                "notified_24h": {"$ne": True}
-            })
+            expiring_24 = ad_subs_collection.find({"end_date": {"$gte": target_24 - timedelta(hours=1), "$lte": target_24 + timedelta(hours=1)}, "notified_24h": {"$ne": True}})
             for sub in expiring_24:
                 try:
-                    bot.send_message(sub['user_id'], f"🚨 <b>Внимание! Последние сутки!</b>\nВаш доступ к <b>{sub['network']}</b> ({sub['city']}) закончится через 24 часа!\nПродлите подписку, чтобы ваши объявления продолжали публиковаться.", parse_mode="HTML")
+                    bot.send_message(sub['user_id'], f"🚨 <b>Остались ровно 1 сутки!</b>\nВаш доступ к <b>{sub['network']}</b> ({sub['city']}) закончится через 24 часа!\n\nЖмите кнопку ниже, чтобы продлить доступ в пару кликов 👇", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
                     ad_subs_collection.update_one({"_id": sub["_id"]}, {"$set": {"notified_24h": True}})
                 except: pass
 
-            time.sleep(3600) # Проверяем базу каждый час
+            # 3. НОВОЕ: Экстренная проверка за 3 часа (Для тех, кто брал на 24 часа)
+            target_3 = now + timedelta(hours=3)
+            expiring_3 = ad_subs_collection.find({"end_date": {"$gte": target_3 - timedelta(hours=1), "$lte": target_3 + timedelta(hours=1)}, "notified_3h": {"$ne": True}})
+            for sub in expiring_3:
+                try:
+                    bot.send_message(sub['user_id'], f"🔥 <b>СГОРАЕТ ЧЕРЕЗ 3 ЧАСА!</b>\nДоступ к <b>{sub['network']}</b> ({sub['city']}) почти истек.\n\nПродлите сейчас, чтобы ваши посты не перестали публиковаться!", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
+                    ad_subs_collection.update_one({"_id": sub["_id"]}, {"$set": {"notified_3h": True}})
+                except: pass
+
+            time.sleep(3600)
         except Exception as e:
             time.sleep(60)
 
