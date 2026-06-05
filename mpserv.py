@@ -1056,7 +1056,7 @@ def handle_category(message):
         bot.send_message(message.chat.id, "Главное меню", reply_markup=get_main_keyboard())
         return
         
-    if "Групп" in message.text:
+    if "групп" in message.text:
         bot.send_message(
             message.chat.id, 
             "Отлично! 🎪 Но перед оплатой мы должны убедиться, что тематика вашего ресурса подходит для нашей сети.\n\n"
