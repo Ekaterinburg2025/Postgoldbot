@@ -1559,7 +1559,7 @@ def process_ad_promo(message, network, city):
     # Сохраняем введенный промокод временно в профиль юзера
     db['users'].update_one({"_id": message.from_user.id}, {"$set": {"temp_promo": promo_text}}, upsert=True)
 
-    discount = promo_data["value"]
+    discount_promo = promo_data["value"]
     markup = types.InlineKeyboardMarkup(row_width=1)
     
     # --- Достаем VIP статус для наценки ---
@@ -1567,12 +1567,20 @@ def process_ad_promo(message, network, city):
     is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
     markup_multiplier = 1.5 if is_vip else 1.0
 
+    discount_net = 0  # 👈 ДОБАВЛЯЕМ ПЕРЕМЕННУЮ ДЛЯ СКИДКИ ЗА ПАКЕТ СЕТЕЙ
+
     if network == "all":
         first_avail_net = list(all_cities[city].keys())[0]
         chat_id = all_cities[city][first_avail_net][0]["chat_id"]
         
         active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": message.from_user.id, "city": city, "end_date": {"$gt": now_ekb()}}))
         buying_now = len([n for n, d in all_cities[city].items() if d]) - active_subs_count
+        
+        # 👇 ВОССТАНАВЛИВАЕМ РАСЧЕТ ПАКЕТНОЙ СКИДКИ 👇
+        total_nets = active_subs_count + buying_now
+        if total_nets == 3: discount_net = 10
+        elif total_nets == 4: discount_net = 20
+        elif total_nets >= 5: discount_net = 30
     else:
         chat_id = all_cities[city][network][0]["chat_id"]
         buying_now = 1
@@ -1582,14 +1590,19 @@ def process_ad_promo(message, network, city):
         if base_p:
             base_p = int(base_p * markup_multiplier)
             
-            # Считаем с учетом количества сетей и промокода
-            f_price = int((base_p * buying_now) * (1 - discount / 100))
+            # 👇 ТЕПЕРЬ СКИДКИ ПРИМЕНЯЮТСЯ КАСКАДОМ 👇
+            # 1. Пакетная скидка (Все сети)
+            price_with_net_discount = int((base_p * buying_now) * (1 - discount_net / 100))
+            
+            # 2. Скидка по промокоду
+            f_price = int(price_with_net_discount * (1 - discount_promo / 100))
+            
             pin_p = int(f_price * 1.2)
             
             btn_prefix = "🔥 VIP:" if is_vip else "💳"
             
             markup.row(
-                types.InlineKeyboardButton(f"{btn_prefix} {days} дн. (-{discount}% за {f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
+                types.InlineKeyboardButton(f"{btn_prefix} {days} дн. (-{discount_promo}% за {f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
                 types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{network}_{city}")
             )
             
