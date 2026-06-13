@@ -1187,8 +1187,11 @@ def select_city_check_payment(message, selected_network):
         try: bot.send_message(message.chat.id, cheap_stars_text, parse_mode="HTML", disable_web_page_preview=True)
         except: pass
 
+        # 👇 ПОДНЯЛИ ПЕРЕМЕННУЮ СЮДА 👇
+        callback_net_key = "all" if selected_network == "Все сети" else net_key
+
         markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("🎫 У меня есть промокод", callback_data=f"ad_promo_{net_key}_{city}"))
+        markup.add(types.InlineKeyboardButton("🎫 У меня есть промокод", callback_data=f"ad_promo_{callback_net_key}_{city}"))
         
         active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": user_id, "city": city, "end_date": {"$gt": now_ekb()}}))
         buying_now = (len([n for n, d in all_cities[city].items() if d]) - active_subs_count) if selected_network == "Все сети" else 1
@@ -1204,6 +1207,8 @@ def select_city_check_payment(message, selected_network):
         is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
         markup_multiplier = 1.5 if is_vip else 1.0 # 👈 НАЦЕНКА +50%
 
+        # (Отсюда строку callback_net_key = ... удаляем, она теперь сверху)
+
         for days in [1, 7, 15, 30]:
             base_p = get_price_for_chat(chat_id, days)
             if base_p:
@@ -1216,9 +1221,10 @@ def select_city_check_payment(message, selected_network):
                 btn_prefix = "🔥 VIP:" if is_vip else "💳"
                 btn_t = f"{btn_prefix} {days} дн. (-{discount}% за {f_price}⭐️)" if discount > 0 else f"{btn_prefix} {days} дн. ({f_price}⭐️)"
                 
+                # 👇 МЕНЯЕМ net_key НА callback_net_key 👇
                 markup.row(
-                    types.InlineKeyboardButton(btn_t, callback_data=f"ad_pay_{days}_{net_key}_{city}"),
-                    types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{net_key}_{city}")
+                    types.InlineKeyboardButton(btn_t, callback_data=f"ad_pay_{days}_{callback_net_key}_{city}"),
+                    types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{callback_net_key}_{city}")
                 )
 
         bot.send_message(
@@ -1487,7 +1493,7 @@ def successful_payment(message):
             city = parts[4]
 
         # 💎 ПЕРЕВОДЧИК: Возвращаем красивое имя перед записью в базу!
-        names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
+        names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства", "all": "Все сети"}
         network = names.get(net_key, net_key)
 
         end_date = now_ekb() + timedelta(days=days)
@@ -1555,33 +1561,35 @@ def process_ad_promo(message, network, city):
 
     discount = promo_data["value"]
     markup = types.InlineKeyboardMarkup(row_width=1)
-    net_key = network
-    chat_id = all_cities[city][net_key][0]["chat_id"]
     
     # --- Достаем VIP статус для наценки ---
     user_data = db['users'].find_one({"_id": message.from_user.id})
     is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
     markup_multiplier = 1.5 if is_vip else 1.0
 
-    discount = promo_data["value"]
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    net_key = network
-    chat_id = all_cities[city][net_key][0]["chat_id"]
-    
+    if network == "all":
+        first_avail_net = list(all_cities[city].keys())[0]
+        chat_id = all_cities[city][first_avail_net][0]["chat_id"]
+        
+        active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": message.from_user.id, "city": city, "end_date": {"$gt": now_ekb()}}))
+        buying_now = len([n for n, d in all_cities[city].items() if d]) - active_subs_count
+    else:
+        chat_id = all_cities[city][network][0]["chat_id"]
+        buying_now = 1
+
     for days in [1, 7, 15, 30]:
         base_p = get_price_for_chat(chat_id, days)
         if base_p:
-            # Умножаем на 1.5 ДО применения скидки по промокоду
             base_p = int(base_p * markup_multiplier)
             
-            f_price = int(base_p * (1 - discount / 100)) # Цена УЖЕ со скидкой
+            # Считаем с учетом количества сетей и промокода
+            f_price = int((base_p * buying_now) * (1 - discount / 100))
             pin_p = int(f_price * 1.2)
             
             btn_prefix = "🔥 VIP:" if is_vip else "💳"
             
-            # Кнопки с правильными названиями и значками
             markup.row(
-                types.InlineKeyboardButton(f"{btn_prefix} {days} дн. ({f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
+                types.InlineKeyboardButton(f"{btn_prefix} {days} дн. (-{discount}% за {f_price}⭐️)", callback_data=f"ad_pay_{days}_{network}_{city}"),
                 types.InlineKeyboardButton(f"📌 +Закреп ({pin_p}⭐️)", callback_data=f"ad_paypin_{days}_{network}_{city}")
             )
             
@@ -1634,22 +1642,46 @@ def handle_ad_checkout(call):
     net_key = parts[3] 
     city = parts[4]
     
-    names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
-    network = names.get(net_key, net_key)
-
-    chat_id = all_cities[city][net_key][0]["chat_id"]
-    base_price = get_price_for_chat(chat_id, days)
-    
-    # --- VIP Наценка ---
+    # --- VIP Наценка и Промо ---
     user_data = db['users'].find_one({"_id": call.from_user.id})
     is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
     temp_promo = user_data.get("temp_promo") if user_data else None
 
-    if is_vip:
-        base_price = int(base_price * 1.5) # Применяем 1.5 к итоговому счету
+    if net_key == "all":
+        network = "Все сети"
+        # Для базовой цены берем первый доступный чат в этом городе
+        first_avail_net = list(all_cities[city].keys())[0]
+        chat_id = all_cities[city][first_avail_net][0]["chat_id"]
+        base_price = get_price_for_chat(chat_id, days)
+        
+        if is_vip:
+            base_price = int(base_price * 1.5)
+            
+        # Воспроизводим расчет скидки для "Всех сетей"
+        active_subs_count = len(ad_subs_collection.distinct("network", {"user_id": call.from_user.id, "city": city, "end_date": {"$gt": now_ekb()}}))
+        buying_now = len([n for n, d in all_cities[city].items() if d]) - active_subs_count
+        total_nets = active_subs_count + buying_now
+        
+        discount_net = 0
+        if total_nets == 3: discount_net = 10
+        elif total_nets == 4: discount_net = 20
+        elif total_nets >= 5: discount_net = 30
+        
+        final_price = int((base_price * buying_now) * (1 - discount_net / 100))
+        amount = int(final_price * 1.2) if is_pin else final_price
 
-    amount = int(base_price * 1.2) if is_pin else base_price
+    else:
+        names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства"}
+        network = names.get(net_key, net_key)
+
+        chat_id = all_cities[city][net_key][0]["chat_id"]
+        base_price = get_price_for_chat(chat_id, days)
+        
+        if is_vip: base_price = int(base_price * 1.5)
+        
+        amount = int(base_price * 1.2) if is_pin else base_price
     
+    # 👇 ВОТ ЭТОТ БЛОК МЫ СЛУЧАЙНО ЗАТЕРЛИ ПРОШЛЫЙ РАЗ 👇
     # --- Вшиваем VIP метку в payload ---
     payload_base = "ad_access_vip" if is_vip else "ad_access"
     payload = f"{payload_base}_discount_{days}_{net_key}_{city}_{temp_promo}" if temp_promo else f"{payload_base}_{days}_{net_key}_{city}"
@@ -1665,7 +1697,8 @@ def handle_ad_checkout(call):
             description_text += f"\n🎁 Промокод: {temp_promo} (-{discount}%)"
             
         db['users'].update_one({"_id": call.from_user.id}, {"$unset": {"temp_promo": ""}})
-    
+    # 👆 КОНЕЦ ВОССТАНОВЛЕННОГО БЛОКА 👆
+
     # 👇 ГЕНЕРИРУЕМ КРИПТО-ССЫЛКИ 👇
     crypto_payload = f"{payload}___{call.from_user.id}"
     url_usdt = get_crypto_pay_url(crypto_payload, amount, f"Реклама: {network} ({city})", asset="USDT")
