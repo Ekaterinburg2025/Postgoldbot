@@ -9,6 +9,7 @@ from bson.objectid import ObjectId
 from urllib.parse import quote
 import requests
 
+
 # 👇 УНИВЕРСАЛЬНЫЙ КАССИР CRYPTOBOT (ДЛЯ РЕКЛАМЫ И ШТРАФОВ) 👇
 def get_crypto_pay_url(custom_payload, amount_stars, description, asset=None):
     import os
@@ -137,6 +138,7 @@ db = mongo_client['elite_bot_db'] # Подключаемся к ЕДИНОЙ б�
 # Коллекции, которые нам понадобятся:
 ad_subs_collection = db['ad_subscriptions'] # НОВАЯ: Подписки на рекламу
 ad_posts_collection = db['ad_posts']        # НОВАЯ: Опубликованные посты
+autopost_queue = db['autopost_queue']       # НОВАЯ: Очередь автопубликаций
 promocodes_collection = db['promocodes']    # СУЩЕСТВУЮЩАЯ ИЗ СКАЙНЕТА
 admins_collection = db['admins']            # НОВАЯ: Список админов
 # =============================================================
@@ -1245,29 +1247,15 @@ def process_text_step(message, selected_network, city):
         bot.send_message(message.chat.id, "Вы вернулись в главное меню.", reply_markup=get_main_keyboard())
         return
 
-    if message.photo or message.video:
-        if message.photo:
-            media_type = "photo"
-            file_id = message.photo[-1].file_id
-            text = message.caption if message.caption else ""
-        elif message.video:
-            media_type = "video"
-            file_id = message.video.file_id
-            text = message.caption if message.caption else ""
-    elif message.text:
-        media_type = None
-        file_id = None
-        text = message.text
-    else:
-        bot.send_message(message.chat.id, "❌ Ошибка! Отправьте текст, фото или видео.")
+    text = message.text or message.caption or ""
+    if not text:
+        bot.send_message(message.chat.id, "❌ Ошибка! Сначала отправьте ТЕКСТ объявления:")
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
 
-    # Проверяем, есть ли у юзера право на ссылки в активной подписке
+    # Проверка стоп-слов
     sub = ad_subs_collection.find_one({"user_id": message.from_user.id, "city": city, "network": {"$in": ["Все сети", selected_network]}, "end_date": {"$gt": now_ekb()}})
     can_post_links = sub.get("can_post_links", False) if sub else False
-
-    # Передаем это право в фильтр стоп-слов!
     is_bad, trigger_word = check_stop_words(text, ignore_black_zone=can_post_links)
     
     if is_bad:
@@ -1275,16 +1263,79 @@ def process_text_step(message, selected_network, city):
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
         return
 
-    # Подтверждение
-    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-    markup.add("Да, опубликовать", "Нет, изменить текст")
-    bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
-    bot.register_next_step_handler(message, handle_confirmation_step, text, media_type, file_id, selected_network, city)
+    # 1. Сохраняем чистый текст во временную корзину MongoDB
+    db['users'].update_one({"_id": message.from_user.id}, {"$set": {"temp_ad_text": text, "temp_ad_media": []}}, upsert=True)
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("✅ Все файлы загружены. Далее")
+    markup.add("Назад")
+    
+    bot.send_message(message.chat.id, "📸 Теперь отправьте фото или видео (до 10 штук).\n<i>Если медиа не нужно, просто нажмите кнопку ниже 👇</i>", parse_mode="HTML", reply_markup=markup)
+    bot.register_next_step_handler(message, process_ad_media_loop, selected_network, city)
+
+
+def process_ad_media_loop(message, selected_network, city):
+    uid = message.from_user.id
+
+    if message.text == "✅ Все файлы загружены. Далее":
+        user_data = db['users'].find_one({"_id": uid})
+        text = user_data.get("temp_ad_text", "")
+        media = user_data.get("temp_ad_media", [])
+        
+        media_type = None
+        file_id = None
+        
+        if len(media) == 1:
+            media_type = media[0]['type']
+            file_id = media[0]['id']
+        elif len(media) > 1:
+            media_type = "album"
+            file_id = "album_data" # Просто метка
+
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=1)
+        markup.add("✅ Опубликовать разово (сейчас)")
+        markup.add("🔁 Настроить Автопубликацию")
+        markup.add("❌ Нет, изменить текст")
+        bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
+        bot.register_next_step_handler(message, handle_confirmation_step, text, media_type, file_id, selected_network, city)
+        return
+
+    if message.text == "Назад":
+        bot.send_message(message.chat.id, "Создание отменено.", reply_markup=get_main_keyboard())
+        return
+
+    # Продолжаем слушать чат
+    bot.register_next_step_handler(message, process_ad_media_loop, selected_network, city)
+
+    media_item = None
+    if message.photo: media_item = {"type": "photo", "id": message.photo[-1].file_id}
+    elif message.video: media_item = {"type": "video", "id": message.video.file_id}
+
+    if media_item:
+        user_data = db['users'].find_one({"_id": uid})
+        current_media = user_data.get('temp_ad_media', [])
+        
+        if len(current_media) >= 10:
+            if not message.media_group_id: # Не спамим, если это один большой альбом
+                bot.send_message(message.chat.id, "🚫 Лимит 10 файлов исчерпан! Жмите «Далее».")
+        else:
+            db['users'].update_one({"_id": uid}, {"$push": {"temp_ad_media": media_item}})
+            if not message.media_group_id:
+                bot.send_message(message.chat.id, f"📥 Файл принят ({len(current_media) + 1}/10)")
 
 def handle_confirmation_step(message, text, media_type, file_id, selected_network, city):
-    if message.text.lower() == "нет, изменить текст":
+    if message.text == "❌ Нет, изменить текст" or message.text.lower() == "нет, изменить текст":
         bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
+        return
+
+    # 👇 ЛОГИКА ВЫБОРА ИНТЕРВАЛА 👇
+    if message.text == "🔁 Настроить Автопубликацию":
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=4)
+        markup.add("4", "6", "8", "12")
+        markup.add("Отмена")
+        bot.send_message(message.chat.id, "⏱ <b>Настройка автопостинга:</b>\nЧерез сколько часов автоматически повторять пост?\n\n<i>Нажмите кнопку или напишите цифру вручную (от 1 до 24):</i>", parse_mode="HTML", reply_markup=markup)
+        bot.register_next_step_handler(message, process_autopost_interval, text, media_type, file_id, selected_network, city)
         return
 
     user_id = message.from_user.id
@@ -1329,22 +1380,85 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
         for location in city_data:
             chat_id = location["chat_id"]
             try:
-                if media_type == "photo": sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                elif media_type == "video": sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                else: sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                if media_type == "album":
+                    # Забираем корзину с медиа из базы
+                    user_data = db['users'].find_one({"_id": user_id})
+                    media_array = user_data.get("temp_ad_media", [])
+                    
+                    media_list = []
+                    for m in media_array:
+                        if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
+                        else: media_list.append(types.InputMediaVideo(m['id']))
+                    
+                    # 1. Отправляем альбом (ТГ запрещает кнопки на альбомах)
+                    bot.send_media_group(chat_id, media_list)
+                    # 2. Следом кидаем текст с Inline-кнопкой ЛС
+                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                    
+                elif media_type == "photo": 
+                    sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                elif media_type == "video": 
+                    sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                else: 
+                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
 
-                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, sent_msg.message_id)
+                # Пишем в историю
+                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id)
                 bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
                 was_published = True
 
+                # Проверка на закрепление
                 if sub and sub.get("has_pin"):
-                    try: bot.pin_chat_message(chat_id, sent_msg.message_id, disable_notification=True)
+                    try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
                     except: pass
 
             except telebot.apihelper.ApiTelegramException as e:
                 bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
 
     ask_for_new_post(message)
+
+def process_autopost_interval(message, text, media_type, file_id, selected_network, city):
+    if message.text == "Отмена":
+        bot.send_message(message.chat.id, "Настройка автопоста отменена.", reply_markup=get_main_keyboard())
+        return
+        
+    try:
+        interval = int(message.text)
+        if interval < 1 or interval > 24:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите корректную цифру от 1 до 24.")
+        bot.register_next_step_handler(message, process_autopost_interval, text, media_type, file_id, selected_network, city)
+        return
+        
+    user_id = message.from_user.id
+    
+    # 1. Публикуем ПЕРВЫЙ пост прямо сейчас (перенаправляем обратно в твою оригинальную функцию)
+    message.text = "✅ Опубликовать разово (сейчас)"
+    handle_confirmation_step(message, text, media_type, file_id, selected_network, city)
+    
+    media_array = []
+    if media_type == "album":
+        media_array = db['users'].find_one({"_id": user_id}).get("temp_ad_media", [])
+
+    autopost_queue.insert_one({
+        "user_id": user_id,
+        "network": selected_network,
+        "city": city,
+        "text": text,
+        "media_type": media_type,
+        "file_id": file_id,
+        "media_array": media_array, # <--- ТЕПЕРЬ СОХРАНЯЕТ АЛЬБОМ
+        "interval_hours": interval,
+        "posts_left": 2, 
+        "next_run": now_ekb() + timedelta(hours=interval)
+    })
+    
+    bot.send_message(message.chat.id, f"🔁 <b>Автопостинг включен!</b>\n\nПервый пост только что вышел. Следующие 2 поста выйдут автоматически с интервалом в <b>{interval} ч.</b>", parse_mode="HTML")
 
 def ask_for_new_post(message):
     markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
@@ -1442,6 +1556,86 @@ def webhook():
 def index():
     return '✅ Бот запущен и работает!'
 
+@app.route('/crypto_webhook', methods=['POST'])
+def crypto_webhook():
+    """Слушатель оплат из CryptoBot"""
+    try:
+        data = request.json
+        # CryptoBot присылает событие invoice_paid, когда счет оплачен
+        if data and data.get("update_type") == "invoice_paid":
+            # Достаем наш спрятанный payload (он выглядит как payload___user_id)
+            invoice_payload = data["payload"]["payload"] 
+            amount_rub = data["payload"]["amount"]
+            
+            # Разделяем строку на оригинальный payload и ID юзера
+            parts = invoice_payload.split("___")
+            if len(parts) != 2:
+                return 'ok', 200
+            
+            original_payload = parts[0]
+            user_id = int(parts[1])
+            
+            # === ПОВТОРЯЕМ ЛОГИКУ ВЫДАЧИ ПРАВ ИЗ successful_payment ===
+            has_pin = "_pin" in original_payload 
+            is_vip = "_vip" in original_payload
+            
+            clean_payload = original_payload.replace("ad_access_vip_", "").replace("ad_access_", "").replace("_pin", "")
+            p_parts = clean_payload.split('_')
+            
+            if p_parts[0] == "discount":
+                days = int(p_parts[1])
+                net_key = p_parts[2]
+                city = p_parts[3]
+                promo_code = p_parts[4]
+                promocodes_collection.update_one({"_id": promo_code}, {"$inc": {"used_count": 1}})
+            else:
+                days = int(p_parts[0])
+                net_key = p_parts[1]
+                city = p_parts[2]
+
+            names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства", "all": "Все сети"}
+            network = names.get(net_key, net_key)
+
+            end_date = now_ekb() + timedelta(days=days)
+
+            # 1. Записываем доступ в базу
+            ad_subs_collection.insert_one({
+                "user_id": user_id,
+                "network": network,
+                "city": city,
+                "end_date": end_date,
+                "purchase_date": now_ekb(),
+                "has_pin": has_pin,
+                "can_post_links": is_vip, 
+                "notified_72h": True if days <= 3 else False,
+                "notified_24h": True if days <= 1 else False,
+                "notified_3h": False
+            })
+            
+            # 2. Очищаем корзину
+            db['users'].update_one({"_id": user_id}, {"$unset": {"temp_ad_type": ""}})
+            
+            # 3. Пишем в бухгалтерию (чтобы видеть доходы в крипте)
+            db['daily_revenue'].insert_one({
+                "type": "ads_crypto", 
+                "amount": float(amount_rub), 
+                "timestamp": time.time(), 
+                "date": now_ekb().strftime("%d.%m.%Y")
+            })
+
+            # 4. Уведомление админу
+            try: bot.send_message(ADMIN_CHAT_ID, f"🟢 <b>КРИПТО-ОПЛАТА!</b>\nЮзер: <code>{user_id}</code>\nСеть: <b>{network}</b>\nГород: <b>{city}</b>\nСрок: <b>{days}</b> дн.", parse_mode="HTML")
+            except: pass
+
+            # 5. Сообщение счастливому рекламодателю
+            try: bot.send_message(user_id, f"✅ <b>Крипто-оплата успешно получена!</b>\n\nДоступ к сети <b>{network}</b> ({city}) открыт на {days} дней.\nЖмите кнопку ниже, чтобы разместить пост!", parse_mode="HTML", reply_markup=get_main_keyboard())
+            except: pass
+
+    except Exception as e:
+        print(f"Ошибка Webhook CryptoBot: {e}")
+
+    return 'ok', 200
+
 def is_user_paid(user_id, network, city):
     """Проверяет доступ пользователя через MongoDB"""
     # Ищем все активные подписки пользователя для конкретной сети/города
@@ -1478,19 +1672,23 @@ def successful_payment(message):
         db['daily_revenue'].insert_one({"type": "ads", "amount": amount, "timestamp": time.time(), "date": now_ekb().strftime("%d.%m.%Y")})
 
         has_pin = "_pin" in payload 
-        clean_payload = payload.replace("_pin", "")
+        is_vip = "_vip" in payload # Проверяем VIP
+        
+        # Очищаем строку от всех префиксов и суффиксов
+        clean_payload = payload.replace("ad_access_vip_", "").replace("ad_access_", "").replace("_pin", "")
         parts = clean_payload.split('_')
         
-        if "discount" in payload:
-            days = int(parts[3])
-            net_key = parts[4] # Получаем короткий ключ (mk)
-            city = parts[5]
-            promo_code = parts[6]
+        # Теперь первый элемент (parts[0]) всегда либо "discount", либо количество дней
+        if parts[0] == "discount":
+            days = int(parts[1])
+            net_key = parts[2]
+            city = parts[3]
+            promo_code = parts[4]
             promocodes_collection.update_one({"_id": promo_code}, {"$inc": {"used_count": 1}})
         else:
-            days = int(parts[2])
-            net_key = parts[3] # Получаем короткий ключ (mk)
-            city = parts[4]
+            days = int(parts[0])
+            net_key = parts[1]
+            city = parts[2]
 
         # 💎 ПЕРЕВОДЧИК: Возвращаем красивое имя перед записью в базу!
         names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства", "all": "Все сети"}
@@ -1725,6 +1923,10 @@ def handle_ad_checkout(call):
     if url_ton:
         markup.add(types.InlineKeyboardButton("💎 Оплатить через TON (CryptoBot)", url=url_ton))
 
+    # 👇 НОВАЯ КНОПКА 👇
+    markup.add(types.InlineKeyboardButton("💳 Проблема с оплатой/Альтернатива", callback_data=f"ad_altpay_{amount}_{days}_{net_key}_{city}"))
+
+
     bot.send_invoice(
         call.message.chat.id, 
         title="Доступ + ЗАКРЕП 📌" if is_pin else "Доступ к публикации 📢", 
@@ -1735,6 +1937,40 @@ def handle_ad_checkout(call):
         prices=[types.LabeledPrice(label="Рекламный доступ", amount=amount)],
         reply_markup=markup
     )
+
+# 👇 ВСТАВЛЯЕМ СЮДА 👇
+@bot.callback_query_handler(func=lambda call: call.data.startswith('ad_altpay_'))
+def handle_alternative_payment(call):
+    bot.answer_callback_query(call.id)
+    parts = call.data.split('_')
+    amount = int(parts[2])
+    days = parts[3]
+    net_key = parts[4]
+    city = parts[5]
+    
+    names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства", "all": "Все сети"}
+    network = names.get(net_key, net_key)
+    
+    # 🔥 ТА САМАЯ МАФИОЗНАЯ ФОРМУЛА ИЗ СКАЙНЕТА 🔥
+    rub_amount = int(round(amount * 1.65 * 1.1))
+    
+    text = (
+        f"💳 <b>Запрос на альтернативную оплату (Карта / СБП)</b>\n\n"
+        f"Оплатить рекламу можно на одноразовый технологический номер телефона. Сумма рассчитывается по формуле:\n"
+        f"{amount} звезд * 1.65 (курс 1 звезды) + 10% комиссии банка за пополнение = <b>{rub_amount}₽</b>\n\n"
+        f"<b>Ваш заказ:</b>\n"
+        f"🌐 Сеть: <b>{network}</b>\n"
+        f"📍 Город: <b>{city}</b>\n"
+        f"⏳ Срок: <b>{days} дн.</b>\n\n"
+        f"👇 <i>Пожалуйста, перешлите это сообщение (чек) в нашу Поддержку, и дежурный администратор выдаст вам реквизиты!</i>"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("💬 Получить реквизиты в Поддержке", url="https://t.me/FAQMKBOT"))
+    
+    try: bot.delete_message(call.message.chat.id, call.message.message_id)
+    except: pass
+    bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+# 👆 КОНЕЦ ВСТАВКИ 👆
 
 # --- ФОНОВЫЕ ЗАДАЧИ ---
 def check_expiring_subs():
@@ -1785,6 +2021,99 @@ def check_expiring_subs():
 
 # Запускаем поток
 threading.Thread(target=check_expiring_subs, daemon=True).start()
+
+def process_autoposts_worker():
+    """Фоновый поток: публикует отложенные посты каждые X часов"""
+    while True:
+        try:
+            now = now_ekb()
+            ready_posts = list(autopost_queue.find({"next_run": {"$lte": now}, "posts_left": {"$gt": 0}}))
+            
+            for post in ready_posts:
+                user_id = post['user_id']
+                network = post['network']
+                city = post['city']
+                
+                # 1. Проверяем, активна ли еще подписка
+                if not is_user_paid(user_id, network, city):
+                    autopost_queue.delete_one({"_id": post["_id"]})
+                    continue
+
+                # 2. Проверяем лимит 3 поста на сегодня
+                user_stats = get_user_statistics(user_id)
+                city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
+                if city_stats.get("remaining", 0) <= 0:
+                    # Лимит исчерпан. Переносим попытку на завтра (на утро)
+                    autopost_queue.update_one(
+                        {"_id": post["_id"]},
+                        {"$set": {"next_run": now.replace(hour=8, minute=0) + timedelta(days=1)}}
+                    )
+                    continue
+
+                # 3. Публикация
+                try:
+                    user_info = bot.get_chat(user_id)
+                    user_name = f'<b>{get_user_html_link(user_info)}</b>'
+                except:
+                    user_name = f'<b><a href="tg://user?id={user_id}">Пользователь</a></b>'
+                    
+                networks = ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if network == "Все сети" else [network]
+                
+                for net in networks:
+                    net_key = normalize_network_key(net)
+                    city_data = all_cities.get(city, {}).get(net_key)
+                    if not city_data: continue
+                    
+                    signature = network_signatures.get(net, "")
+                    full_text = f"📢 Объявление от {user_name}:\n\n{post['text']}\n\n{signature}"
+                    reply_markup = types.InlineKeyboardMarkup()
+                    reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
+                    
+                    for location in city_data:
+                        chat_id = location["chat_id"]
+                        try:
+                            if post['media_type'] == "album":
+                                media_list = []
+                                for m in post.get('media_array', []):
+                                    if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
+                                    else: media_list.append(types.InputMediaVideo(m['id']))
+                                
+                                bot.send_media_group(chat_id, media_list)
+                                sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                            elif post['media_type'] == "photo": 
+                                sent_msg = bot.send_photo(chat_id, post['file_id'], caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                            elif post['media_type'] == "video": 
+                                sent_msg = bot.send_video(chat_id, post['file_id'], caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                            else: 
+                                sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                            
+                            add_post_to_history(user_id, "Автопост", net, location['name'], chat_id, sent_msg.message_id)
+                            
+                            # Проверяем закреп
+                            sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети", net]}, "end_date": {"$gt": now_ekb()}})
+                            if sub and sub.get("has_pin"):
+                                try: bot.pin_chat_message(chat_id, sent_msg.message_id, disable_notification=True)
+                                except: pass
+                                
+                        except Exception as e: pass
+                            
+                # 4. Обновляем счетчик
+                posts_left = post['posts_left'] - 1
+                if posts_left > 0:
+                    autopost_queue.update_one(
+                        {"_id": post["_id"]}, 
+                        {"$set": {"posts_left": posts_left, "next_run": now + timedelta(hours=post['interval_hours'])}}
+                    )
+                else:
+                    autopost_queue.delete_one({"_id": post["_id"]})
+                    try: bot.send_message(user_id, f"ℹ️ Серия автопубликаций для <b>{network} ({city})</b> завершена (3 из 3 постов вышли).", parse_mode="HTML")
+                    except: pass
+                    
+        except Exception as e: pass
+        time.sleep(60) # Проверка базы раз в минуту
+
+# 👇 ЗАПУСКАЕМ НАШ НОВЫЙ ПОТОК (Вставить перед if __name__ == '__main__':)
+threading.Thread(target=process_autoposts_worker, daemon=True).start()
 
 if __name__ == '__main__':
     print("✅ Скайнет-Модуль mpserv запущен!")
