@@ -347,15 +347,15 @@ network_signatures = {
     )
 }
 
-# 👇 НОВЫЕ АНИМИРОВАННЫЕ БУКВЫ ДЛЯ РЕКЛАМЫ 👇
+# 👇 ИСПРАВЛЕННЫЕ АНИМИРОВАННЫЕ БУКВЫ ДЛЯ РЕКЛАМЫ 👇
 ad_top_stickers = (
-    '<tg-emoji emoji-id="5201752612944227217">Р</tg-emoji>'
-    '<tg-emoji emoji-id="5202103215419565870">Е</tg-emoji>'
-    '<tg-emoji emoji-id="5201883154180219754">К</tg-emoji>'
-    '<tg-emoji emoji-id="5202154574638491240">Л</tg-emoji>'
-    '<tg-emoji emoji-id="5201849382852372388">А</tg-emoji>'
-    '<tg-emoji emoji-id="5199909809981237698">М</tg-emoji>'
-    '<tg-emoji emoji-id="5201849382852372388">А</tg-emoji>\n\n'
+    '<tg-emoji emoji-id="5201752612944227217">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5202103215419565870">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5201883154180219754">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5202154574638491240">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5201849382852372388">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5199909809981237698">🔥</tg-emoji>'
+    '<tg-emoji emoji-id="5201849382852372388">🔥</tg-emoji>\n\n'
 )
 
 # ==================== БИГ-ЧАТЫ И ЦЕНООБРАЗОВАНИЕ ====================
