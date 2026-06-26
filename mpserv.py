@@ -1477,6 +1477,111 @@ def handle_new_post_choice(message):
             reply_markup=get_main_keyboard()
         )
 
+# ==================== УДАЛЕНИЕ ОБЪЯВЛЕНИЙ ПОЛЬЗОВАТЕЛЕМ ====================
+
+@bot.message_handler(func=lambda message: message.text == "Удалить объявление")
+def handle_user_delete_ad(message):
+    if message.chat.type != "private": return
+    user_id = message.from_user.id
+    
+    # Ищем активные посты юзера
+    posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}).sort("time", pymongo.DESCENDING).limit(15))
+    
+    if not posts:
+        bot.send_message(message.chat.id, "🤷‍♂️ У вас нет активных объявлений для удаления.")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for post in posts:
+        date_str = format_time(post["time"])
+        btn_text = f"❌ {post.get('network', 'Сеть')} | {post.get('city', 'Город')} | {date_str}"
+        markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"user_del_{post['_id']}"))
+        
+    bot.send_message(
+        message.chat.id, 
+        "🗑 <b>Выберите объявление для удаления:</b>\n\n<i>Показаны ваши последние активные публикации.</i>", 
+        reply_markup=markup, 
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("user_del_"))
+def process_user_delete_ad(call):
+    post_id = call.data.replace("user_del_", "")
+    
+    try:
+        # Ищем пост и убеждаемся, что он принадлежит этому юзеру
+        post = ad_posts_collection.find_one({"_id": ObjectId(post_id), "user_id": call.from_user.id})
+        
+        if not post or post.get("deleted"):
+            bot.answer_callback_query(call.id, "❌ Объявление не найдено или уже было удалено.", show_alert=True)
+            return
+
+        # 1. Удаляем из Telegram-канала/чата
+        try:
+            bot.delete_message(post["chat_id"], post["message_id"])
+        except telebot.apihelper.ApiTelegramException as e:
+            # Если пост старше 48 часов или уже удален руками админа в самом канале
+            print(f"Не удалось удалить сообщение {post['message_id']} в чате {post['chat_id']}: {e}")
+
+        # 2. Помечаем как удаленное в MongoDB
+        ad_posts_collection.update_one({"_id": ObjectId(post_id)}, {"$set": {"deleted": True, "deleted_by": "Юзер"}})
+        
+        bot.answer_callback_query(call.id, "✅ Объявление успешно удалено!")
+        bot.edit_message_text("✅ <b>Объявление удалено.</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Произошла ошибка при удалении.")
+        print(f"Ошибка удаления юзером: {e}")
+
+@bot.message_handler(func=lambda message: message.text == "Удалить все объявления")
+def handle_user_delete_all_ads(message):
+    if message.chat.type != "private": return
+    user_id = message.from_user.id
+    
+    posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}))
+    
+    if not posts:
+        bot.send_message(message.chat.id, "🤷‍♂️ У вас нет активных объявлений.")
+        return
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Да, удалить всё", callback_data="confirm_del_all_user"),
+        types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_del_all_user")
+    )
+    
+    bot.send_message(
+        message.chat.id, 
+        f"⚠️ Вы уверены, что хотите удалить <b>ВСЕ</b> ваши активные объявления ({len(posts)} шт.)?\nОни будут удалены из всех каналов.", 
+        reply_markup=markup, 
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data in ["confirm_del_all_user", "cancel_del_all_user"])
+def process_user_delete_all_ads(call):
+    if call.data == "cancel_del_all_user":
+        bot.edit_message_text("❌ Массовое удаление отменено.", call.message.chat.id, call.message.message_id)
+        return
+
+    user_id = call.from_user.id
+    posts = list(ad_posts_collection.find({"user_id": user_id, "deleted": False}))
+    
+    deleted_count = 0
+    for post in posts:
+        # Удаляем из Telegram
+        try:
+            bot.delete_message(post["chat_id"], post["message_id"])
+        except: 
+            pass # Игнорируем ошибки для старых сообщений
+        
+        # Обновляем в MongoDB
+        ad_posts_collection.update_one({"_id": post["_id"]}, {"$set": {"deleted": True, "deleted_by": "Юзер"}})
+        deleted_count += 1
+        
+    bot.edit_message_text(f"✅ Успешно удалено <b>{deleted_count}</b> объявлений.", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+# ===========================================================================
+
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
     try:
