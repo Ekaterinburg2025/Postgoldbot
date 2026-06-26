@@ -1556,11 +1556,18 @@ def webhook():
 def index():
     return '✅ Бот запущен и работает!'
 
-@app.route('/crypto_webhook', methods=['POST'])
+# 👇 МЫ ДОБАВИЛИ 'GET' В СПИСОК РАЗРЕШЕННЫХ МЕТОДОВ 👇
+@app.route('/crypto_webhook', methods=['GET', 'POST'])
 def crypto_webhook():
     """Слушатель оплат из CryptoBot"""
+    # Защита от 405 ошибки (если открыть ссылку в браузере или при пинге)
+    if request.method == 'GET':
+        return "✅ CryptoBot Webhook активен и ждет оплат!", 200
+
     try:
-        data = request.json
+        # silent=True не даст боту упасть, если придет битый запрос
+        data = request.get_json(silent=True)
+        
         # CryptoBot присылает событие invoice_paid, когда счет оплачен
         if data and data.get("update_type") == "invoice_paid":
             # Достаем наш спрятанный payload (он выглядит как payload___user_id)
@@ -1578,7 +1585,7 @@ def crypto_webhook():
             # === ПОВТОРЯЕМ ЛОГИКУ ВЫДАЧИ ПРАВ ИЗ successful_payment ===
             has_pin = "_pin" in original_payload 
             is_vip = "_vip" in original_payload
-            
+           
             clean_payload = original_payload.replace("ad_access_vip_", "").replace("ad_access_", "").replace("_pin", "")
             p_parts = clean_payload.split('_')
             
