@@ -140,6 +140,7 @@ ad_subs_collection = db['ad_subscriptions'] # НОВАЯ: Подписки на 
 ad_posts_collection = db['ad_posts']        # НОВАЯ: Опубликованные посты
 autopost_queue = db['autopost_queue']       # НОВАЯ: Очередь автопубликаций
 promocodes_collection = db['promocodes']    # СУЩЕСТВУЮЩАЯ ИЗ СКАЙНЕТА
+ad_templates_collection = db['ad_templates'] # НОВАЯ: Шаблоны пользователей
 admins_collection = db['admins']            # НОВАЯ: Список админов
 # =============================================================
 
@@ -390,7 +391,8 @@ def get_price_for_chat(chat_id, days):
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "Удалить объявление", "Удалить все объявления", "📊 Моя статистика")
+    markup.add("Создать новое объявление", "📝 Мои шаблоны") # Добавили кнопку
+    markup.add("Удалить объявление", "Удалить все объявления", "📊 Моя статистика")
     return markup
 
 def format_time(dt):
@@ -1238,9 +1240,18 @@ def select_city_check_payment(message, selected_network):
         log_failed_attempt(user_id, selected_network, city, "Нет доступа")
         return # Останавливаем процесс, ждем оплату
 
-    # ЕСЛИ ОПЛАТА ЕСТЬ — ИДЕМ ДАЛЬШЕ И ПРОСИМ ТЕКСТ
-    bot.send_message(message.chat.id, f"✅ Доступ подтверждён!\n\nНапишите текст объявления для <b>{selected_network} ({city})</b>:", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(message, process_text_step, selected_network, city)
+    # ЕСЛИ ОПЛАТА ЕСТЬ — ИДЕМ ДАЛЬШЕ
+    user_data = db['users'].find_one({"_id": message.from_user.id})
+    if user_data and user_data.get("temp_ad_text"):
+        # Если текст уже загружен из шаблона, перепрыгиваем к предпросмотру
+        msg = types.Message(message.message_id, message.from_user, message.date, message.chat, "content_type", {}, "")
+        msg.text = "✅ Все файлы загружены. Далее"
+        bot.send_message(message.chat.id, "✅ Доступ подтвержден. Идет подготовка шаблона...")
+        process_ad_media_loop(msg, selected_network, city)
+    else:
+        # Обычный сценарий — просим текст
+        bot.send_message(message.chat.id, f"✅ Доступ подтверждён!\n\nНапишите текст объявления для <b>{selected_network} ({city})</b>:", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        bot.register_next_step_handler(message, process_text_step, selected_network, city)
 
 def process_text_step(message, selected_network, city):
     if message.text == "Назад":
@@ -1290,13 +1301,47 @@ def process_ad_media_loop(message, selected_network, city):
             file_id = media[0]['id']
         elif len(media) > 1:
             media_type = "album"
-            file_id = "album_data" # Просто метка
+            file_id = "album_data"
 
+        # --- 👁 ГЕНЕРАЦИЯ ПРЕДПРОСМОТРА ---
+        bot.send_message(message.chat.id, "👁 <b>ПРЕДПРОСМОТР ВАШЕГО ОБЪЯВЛЕНИЯ:</b>\n<i>Именно так его увидят пользователи в группе:</i>", parse_mode="HTML")
+        
+        # Берем подпись для выбранной сети (если "Все сети", берем подпись МК как дефолтную для превью)
+        preview_network = "Мужской Клуб" if selected_network == "Все сети" else selected_network
+        signature = network_signatures.get(preview_network, "")
+        
+        user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
+        full_text_preview = f"📢 Объявление от {user_name}:\n\n{escape_html(text)}\n\n{signature}"
+        
+        reply_markup = types.InlineKeyboardMarkup()
+        reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={uid}", style="success", icon_custom_emoji_id="5470060791883374114"))
+        
+        try:
+            if media_type == "album":
+                media_list = []
+                for m in media:
+                    if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
+                    else: media_list.append(types.InputMediaVideo(m['id']))
+                bot.send_media_group(message.chat.id, media_list)
+                bot.send_message(message.chat.id, full_text_preview, parse_mode="HTML", reply_markup=reply_markup)
+            elif media_type == "photo": 
+                bot.send_photo(message.chat.id, file_id, caption=full_text_preview, parse_mode="HTML", reply_markup=reply_markup)
+            elif media_type == "video": 
+                bot.send_video(message.chat.id, file_id, caption=full_text_preview, parse_mode="HTML", reply_markup=reply_markup)
+            else: 
+                bot.send_message(message.chat.id, full_text_preview, parse_mode="HTML", reply_markup=reply_markup)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"⚠️ Ошибка генерации предпросмотра: {e}")
+        # -----------------------------------
+
+        # Выводим меню действий после предпросмотра
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True, row_width=1)
         markup.add("✅ Опубликовать разово (сейчас)")
         markup.add("🔁 Настроить Автопубликацию")
+        markup.add("💾 Сохранить как шаблон (и выйти)") # Новая кнопка
         markup.add("❌ Нет, изменить текст")
-        bot.send_message(message.chat.id, f"Ваш текст:\n{text}\n\nВсё верно?", reply_markup=markup)
+        
+        bot.send_message(message.chat.id, "Всё выглядит отлично? Выберите действие:", reply_markup=markup)
         bot.register_next_step_handler(message, handle_confirmation_step, text, media_type, file_id, selected_network, city)
         return
 
@@ -1304,7 +1349,7 @@ def process_ad_media_loop(message, selected_network, city):
         bot.send_message(message.chat.id, "Создание отменено.", reply_markup=get_main_keyboard())
         return
 
-    # Продолжаем слушать чат
+    # Продолжаем слушать чат для медиа
     bot.register_next_step_handler(message, process_ad_media_loop, selected_network, city)
 
     media_item = None
@@ -1316,17 +1361,44 @@ def process_ad_media_loop(message, selected_network, city):
         current_media = user_data.get('temp_ad_media', [])
         
         if len(current_media) >= 10:
-            if not message.media_group_id: # Не спамим, если это один большой альбом
+            if not getattr(message, 'media_group_id', None):
                 bot.send_message(message.chat.id, "🚫 Лимит 10 файлов исчерпан! Жмите «Далее».")
         else:
             db['users'].update_one({"_id": uid}, {"$push": {"temp_ad_media": media_item}})
-            if not message.media_group_id:
+            if not getattr(message, 'media_group_id', None):
                 bot.send_message(message.chat.id, f"📥 Файл принят ({len(current_media) + 1}/10)")
 
 def handle_confirmation_step(message, text, media_type, file_id, selected_network, city):
     if message.text == "❌ Нет, изменить текст" or message.text.lower() == "нет, изменить текст":
         bot.send_message(message.chat.id, "Хорошо, напишите текст объявления заново:")
         bot.register_next_step_handler(message, process_text_step, selected_network, city)
+        return
+
+    # 👇 ЛОГИКА СОХРАНЕНИЯ ШАБЛОНА 👇
+    if message.text == "💾 Сохранить как шаблон (и выйти)":
+        user_id = message.from_user.id
+        user_data = db['users'].find_one({"_id": user_id})
+        media_array = user_data.get("temp_ad_media", [])
+
+        # Генерируем короткое имя по умолчанию из первых слов текста
+        short_name = " ".join(text.split()[:3]) + "..."
+        
+        ad_templates_collection.insert_one({
+            "user_id": user_id,
+            "name": short_name,
+            "text": text,
+            "media_type": media_type,
+            "file_id": file_id,
+            "media_array": media_array,
+            "created_at": now_ekb()
+        })
+        
+        bot.send_message(
+            message.chat.id, 
+            f"✅ <b>Шаблон сохранен!</b>\nТеперь вы можете быстро запустить его из меню «📝 Мои шаблоны».", 
+            parse_mode="HTML", 
+            reply_markup=get_main_keyboard()
+        )
         return
 
     # 👇 ЛОГИКА ВЫБОРА ИНТЕРВАЛА 👇
@@ -1421,6 +1493,72 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
 
     ask_for_new_post(message)
 
+# ==================== УПРАВЛЕНИЕ ШАБЛОНАМИ ====================
+
+@bot.message_handler(func=lambda message: message.text == "📝 Мои шаблоны")
+def handle_my_templates(message):
+    if message.chat.type != "private": return
+    user_id = message.from_user.id
+    
+    templates = list(ad_templates_collection.find({"user_id": user_id}).sort("created_at", pymongo.DESCENDING))
+    
+    if not templates:
+        bot.send_message(message.chat.id, "🤷‍♂️ У вас пока нет сохраненных шаблонов. Вы можете сохранить объявление как шаблон на этапе предпросмотра.")
+        return
+
+    for t in templates:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("🚀 Использовать для публикации", callback_data=f"use_tpl_{t['_id']}"),
+            types.InlineKeyboardButton("🗑 Удалить шаблон", callback_data=f"del_tpl_{t['_id']}")
+        )
+        
+        # Показываем карточку шаблона
+        preview_text = f"📝 <b>Шаблон:</b> {escape_html(t.get('name', 'Без имени'))}\n\n"
+        preview_text += f"<i>{escape_html(t['text'][:150])}...</i>" if len(t['text']) > 150 else f"<i>{escape_html(t['text'])}</i>"
+        
+        media_status = "🖼 Есть вложения" if t.get('media_array') else "Без медиафайлов"
+        preview_text += f"\n\n📎 <b>Медиа:</b> {media_status}"
+
+        bot.send_message(message.chat.id, preview_text, parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("del_tpl_"))
+def handle_delete_template(call):
+    tpl_id = call.data.replace("del_tpl_", "")
+    ad_templates_collection.delete_one({"_id": ObjectId(tpl_id), "user_id": call.from_user.id})
+    
+    bot.edit_message_text("🗑 Шаблон удален.", call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("use_tpl_"))
+def handle_use_template(call):
+    bot.answer_callback_query(call.id)
+    tpl_id = call.data.replace("use_tpl_", "")
+    template = ad_templates_collection.find_one({"_id": ObjectId(tpl_id)})
+    
+    if not template:
+        bot.send_message(call.message.chat.id, "❌ Ошибка: шаблон не найден.")
+        return
+
+    # Загружаем шаблон в корзину пользователя
+    db['users'].update_one(
+        {"_id": call.from_user.id}, 
+        {"$set": {
+            "temp_ad_text": template['text'], 
+            "temp_ad_media": template.get('media_array', []),
+            "temp_ad_type": "std" # Сбрасываем тип на стандартный
+        }}, 
+        upsert=True
+    )
+    
+    bot.send_message(
+        call.message.chat.id, 
+        f"✅ <b>Шаблон загружен!</b>\nКуда будем публиковать?", 
+        parse_mode="HTML", 
+        reply_markup=get_network_markup()
+    )
+    # Передаем эстафету выбора сети (пропуская шаг написания текста)
+    bot.register_next_step_handler(call.message, select_network_step)
+
 def process_autopost_interval(message, text, media_type, file_id, selected_network, city):
     if message.text == "Отмена":
         bot.send_message(message.chat.id, "Настройка автопоста отменена.", reply_markup=get_main_keyboard())
@@ -1468,8 +1606,8 @@ def ask_for_new_post(message):
 
 def handle_new_post_choice(message):
     if message.text.lower() == "да":
-        bot.send_message(message.chat.id, "Напишите текст объявления:")
-        bot.register_next_step_handler(message, process_text)
+        # Перекидываем в самое начало воронки создания
+        create_new_post_category(message)
     else:
         bot.send_message(
             message.chat.id,
