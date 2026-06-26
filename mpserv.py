@@ -408,8 +408,9 @@ def get_price_for_chat(chat_id, days):
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Создать новое объявление", "📝 Мои шаблоны") # Добавили кнопку
-    markup.add("Удалить объявление", "Удалить все объявления", "📊 Моя статистика")
+    markup.add("Создать новое объявление", "📝 Мои шаблоны")
+    markup.add("Удалить объявление", "Удалить все объявления")
+    markup.add("🔁 Мои автопосты", "📊 Моя статистика") # 👈 НОВАЯ КНОПКА ЗДЕСЬ
     return markup
 
 def format_time(dt):
@@ -1753,6 +1754,62 @@ def process_user_delete_all_ads(call):
 
 # ===========================================================================
 
+# ==================== УПРАВЛЕНИЕ АВТОПОСТИНГОМ ====================
+
+@bot.message_handler(func=lambda message: message.text == "🔁 Мои автопосты")
+def handle_my_autoposts(message):
+    if message.chat.type != "private": return
+    user_id = message.from_user.id
+    
+    # Ищем активные задачи автопостинга
+    tasks = list(autopost_queue.find({"user_id": user_id}).sort("next_run", pymongo.ASCENDING))
+    
+    if not tasks:
+        bot.send_message(message.chat.id, "🤷‍♂️ У вас нет активных задач автопостинга.")
+        return
+
+    bot.send_message(message.chat.id, f"📋 <b>Ваши активные задачи ({len(tasks)}):</b>", parse_mode="HTML")
+
+    for t in tasks:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("❌ Отменить автопост", callback_data=f"cancel_ap_{t['_id']}")
+        )
+        
+        # Формируем красивое описание
+        next_run_str = to_ekb_str(t['next_run'], '%d.%m.%Y в %H:%M')
+        preview_text = (
+            f"🔁 <b>Автопостинг:</b> {escape_html(t.get('network', 'Сеть'))} | {escape_html(t.get('city', 'Город'))}\n"
+            f"⏳ <b>Следующий выход:</b> {next_run_str}\n"
+            f"📦 <b>Осталось постов:</b> {t.get('posts_left', 0)}\n"
+            f"⏱ <b>Интервал:</b> {t.get('interval_hours', 0)} ч.\n\n"
+        )
+        
+        text_snippet = t.get('text', '')
+        preview_text += f"<i>{escape_html(text_snippet[:150])}...</i>" if len(text_snippet) > 150 else f"<i>{escape_html(text_snippet)}</i>"
+
+        bot.send_message(message.chat.id, preview_text, parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_ap_"))
+def handle_cancel_autopost(call):
+    task_id = call.data.replace("cancel_ap_", "")
+    
+    try:
+        # Удаляем задачу из базы, строго убедившись, что она принадлежит этому юзеру
+        result = autopost_queue.delete_one({"_id": ObjectId(task_id), "user_id": call.from_user.id})
+        
+        if result.deleted_count > 0:
+            bot.edit_message_text("✅ <b>Задача автопостинга отменена.</b>\nБольше посты по этому расписанию выходить не будут.", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+        else:
+            bot.answer_callback_query(call.id, "❌ Задача не найдена или уже была завершена.", show_alert=True)
+            try: bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Произошла ошибка.")
+        print(f"Ошибка отмены автопоста: {e}")
+
+# ==================================================================
+
 @bot.message_handler(func=lambda message: message.text == "📊 Моя статистика")
 def handle_stats_button(message):
     try:
@@ -2215,6 +2272,30 @@ def handle_ad_checkout(call):
     # 👇 НОВАЯ КНОПКА 👇
     markup.add(types.InlineKeyboardButton("💳 Проблема с оплатой/Альтернатива", callback_data=f"ad_altpay_{amount}_{days}_{net_key}_{city}"))
 
+    # 👇 ЭКОСИСТЕМА СЕКРЕТАРЯ: Кэшбэк (₽) и Очки (🎰) 👇
+    paid_user = db['paid_users'].find_one({"uid": call.from_user.id})
+    
+    # Достаем ПРАВИЛЬНЫЕ ключи из Секретаря!
+    rub_balance = paid_user.get("cashback_balance", 0) if paid_user else 0
+    points_balance = paid_user.get("bounty_points", 0) if paid_user else 0 
+    
+    # Считаем стоимость тарифа во внутренних валютах
+    cost_rub = int(amount * 1.8) # Курс: 1 звезда = 1.8₽
+    cost_points = amount * 5    # Курс: 1 звезда = 5 очков
+    pin_flag = "1" if is_pin else "0"
+    
+    # 1. Кнопка оплаты РУБЛЯМИ (Кэшбэк из рулетки)
+    if rub_balance >= cost_rub:
+        markup.add(types.InlineKeyboardButton(f"💳 Списать с баланса ({cost_rub}₽)", callback_data=f"ad_rubpay_{cost_rub}_{days}_{net_key}_{pin_flag}_{city}"))
+    elif rub_balance > 0:
+        markup.add(types.InlineKeyboardButton(f"💳 Баланса не хватает (Твой: {rub_balance}₽)", callback_data="insufficient_funds"))
+
+    # 2. Кнопка оплаты ОЧКАМИ
+    if points_balance >= cost_points:
+        markup.add(types.InlineKeyboardButton(f"🎰 Оплатить очками ({cost_points} очк.)", callback_data=f"ad_pointspay_{cost_points}_{days}_{net_key}_{pin_flag}_{city}"))
+    elif points_balance > 0:
+        markup.add(types.InlineKeyboardButton(f"🎰 Очков не хватает (Твои: {points_balance})", callback_data="insufficient_funds"))
+    # 👆 =================================== 👆
 
     bot.send_invoice(
         call.message.chat.id, 
@@ -2260,6 +2341,94 @@ def handle_alternative_payment(call):
     except: pass
     bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
 # 👆 КОНЕЦ ВСТАВКИ 👆
+
+# ==================== ОПЛАТА ИЗ ЭКОСИСТЕМЫ РУЛЕТКИ (₽ / Очки) ====================
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('ad_rubpay_') or call.data.startswith('ad_pointspay_'))
+def handle_ecosystem_payment(call):
+    bot.answer_callback_query(call.id)
+    
+    is_points = call.data.startswith('ad_pointspay_')
+    parts = call.data.split('_')
+    
+    cost = int(parts[2]) # Сюда прилетит либо сумма в ₽, либо в очках
+    days = int(parts[3])
+    net_key = parts[4]
+    is_pin = True if parts[5] == "1" else False
+    city = "_".join(parts[6:]) 
+    
+    user_id = call.from_user.id
+    paid_user = db['paid_users'].find_one({"uid": user_id})
+    
+    # Настраиваем переменные в зависимости от типа валюты
+    if is_points:
+        current_funds = paid_user.get("bounty_points", 0) if paid_user else 0
+        update_field = "bounty_points"
+        currency_name = "очков"
+        revenue_type = "ads_points"
+        equivalent_stars = cost // 5 # Для бухгалтерии
+    else:
+        current_funds = paid_user.get("cashback_balance", 0) if paid_user else 0
+        update_field = "cashback_balance"
+        currency_name = "₽"
+        revenue_type = "ads_rub_balance"
+        equivalent_stars = int(cost / 1.8) # Возвращаем в звезды для бухгалтерии
+
+    # Проверка на случай, если баланс изменился пока висело меню
+    if current_funds < cost:
+        bot.send_message(call.message.chat.id, f"❌ Ошибка транзакции: Недостаточно {currency_name} на счету!")
+        return
+        
+    # 1. Списываем средства из БД Секретаря
+    db['paid_users'].update_one({"uid": user_id}, {"$inc": {update_field: -cost}})
+    
+    # 2. Пишем в бухгалтерию (в эквиваленте звезд, чтобы проще считать доходы)
+    db['daily_revenue'].insert_one({
+        "type": revenue_type, 
+        "amount": equivalent_stars, 
+        "timestamp": time.time(), 
+        "date": now_ekb().strftime("%d.%m.%Y")
+    })
+    
+    # 3. Выдаем рекламный доступ
+    names = {"mk": "Мужской Клуб", "parni": "ПАРНИ 18+", "ns": "НС", "rainbow": "Радуга", "gayznak": "Гей Знакомства", "all": "Все сети"}
+    network = names.get(net_key, net_key)
+    end_date = now_ekb() + timedelta(days=days)
+    
+    user_data = db['users'].find_one({"_id": user_id})
+    is_vip = user_data.get("temp_ad_type") == "vip" if user_data else False
+
+    ad_subs_collection.insert_one({
+        "user_id": user_id,
+        "network": network,
+        "city": city,
+        "end_date": end_date,
+        "purchase_date": now_ekb(),
+        "has_pin": is_pin,
+        "can_post_links": is_vip, 
+        "notified_72h": True if days <= 3 else False,
+        "notified_24h": True if days <= 1 else False,
+        "notified_3h": False
+    })
+    
+    db['users'].update_one({"_id": user_id}, {"$unset": {"temp_ad_type": ""}})
+    
+    try: bot.delete_message(call.message.chat.id, call.message.message_id)
+    except: pass
+    
+    bot.send_message(
+        user_id, 
+        f"🎉 <b>Оплата успешно прошла!</b>\n\nСписано: <b>{cost}{currency_name if currency_name == '₽' else ' ' + currency_name}</b>\nДоступ к <b>{network}</b> ({city}) открыт на {days} дней.\n\nЖмите кнопку ниже, чтобы разместить пост!", 
+        parse_mode="HTML", 
+        reply_markup=get_main_keyboard()
+    )
+    
+    try: bot.send_message(ADMIN_CHAT_ID, f"🎰 <b>ОПЛАТА ИЗ РУЛЕТКИ!</b>\nЮзер: <code>{user_id}</code> купил рекламу за {cost}{currency_name if currency_name == '₽' else ' ' + currency_name}.\nСеть: <b>{network} ({city})</b> на {days} дн.", parse_mode="HTML")
+    except: pass
+
+@bot.callback_query_handler(func=lambda call: call.data == "insufficient_funds")
+def handle_insufficient_funds(call):
+    bot.answer_callback_query(call.id, "На вашем счету не хватает средств для оплаты этого тарифа! 😔 Поиграйте еще или пополните баланс.", show_alert=True)
 
 # --- ФОНОВЫЕ ЗАДАЧИ ---
 def check_expiring_subs():
