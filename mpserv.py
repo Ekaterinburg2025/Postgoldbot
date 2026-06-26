@@ -176,9 +176,9 @@ def log_failed_attempt(user_id, network, city, reason):
     })
     print(f"[FAILED] {user_id}, {network}, {city}, {reason}")
 
-def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, deleted=False, deleted_by=None):
+def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, deleted=False, deleted_by=None, media_message_ids=None):
     """Сохраняет пост в архив MongoDB."""
-    ad_posts_collection.insert_one({
+    post_data = {
         "user_id": user_id,
         "user_name": user_name,
         "network": network,
@@ -188,7 +188,13 @@ def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, 
         "message_id": message_id,
         "deleted": deleted,
         "deleted_by": deleted_by
-    })
+    }
+    
+    # Записываем ID всех фоток из альбома, если они есть
+    if media_message_ids:
+        post_data["media_message_ids"] = media_message_ids
+        
+    ad_posts_collection.insert_one(post_data)
 
 # 🧠 Автогенерация all_cities на основе chat_ids_* и учёта особых случаев
 
@@ -340,6 +346,17 @@ network_signatures = {
         "<i>Реклама. Не является публичной офертой.</i>"
     )
 }
+
+# 👇 НОВЫЕ АНИМИРОВАННЫЕ БУКВЫ ДЛЯ РЕКЛАМЫ 👇
+ad_top_stickers = (
+    '<tg-emoji emoji-id="5201752612944227217">Р</tg-emoji>'
+    '<tg-emoji emoji-id="5202103215419565870">Е</tg-emoji>'
+    '<tg-emoji emoji-id="5201883154180219754">К</tg-emoji>'
+    '<tg-emoji emoji-id="5202154574638491240">Л</tg-emoji>'
+    '<tg-emoji emoji-id="5201849382852372388">А</tg-emoji>'
+    '<tg-emoji emoji-id="5199909809981237698">М</tg-emoji>'
+    '<tg-emoji emoji-id="5201849382852372388">А</tg-emoji>\n\n'
+)
 
 # ==================== БИГ-ЧАТЫ И ЦЕНООБРАЗОВАНИЕ ====================
 BIG_CHATS = [
@@ -1058,6 +1075,12 @@ def get_user_html_link(user):
 def create_new_post_category(message):
     if message.chat.type != "private": return
     
+    # 🧹 ОЧИЩАЕМ КОРЗИНУ (чтобы бот забыл старые посты/шаблоны)
+    db['users'].update_one(
+        {"_id": message.from_user.id}, 
+        {"$unset": {"temp_ad_text": "", "temp_ad_media": ""}}
+    )
+    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=1)
     markup.add("💆‍♂️ Встречи / Услуги / Массажи", "📢 Реклама TG-групп / Каналов", "Назад")
     bot.send_message(message.chat.id, "Выберите категорию вашего объявления:", reply_markup=markup)
@@ -1311,7 +1334,7 @@ def process_ad_media_loop(message, selected_network, city):
         signature = network_signatures.get(preview_network, "")
         
         user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
-        full_text_preview = f"📢 Объявление от {user_name}:\n\n{escape_html(text)}\n\n{signature}"
+        full_text_preview = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{escape_html(text)}\n\n{signature}"
         
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={uid}", style="success", icon_custom_emoji_id="5470060791883374114"))
@@ -1444,7 +1467,7 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
 
         # --- Публикация ---
         signature = network_signatures.get(network, "")
-        full_text = f"📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
+        full_text = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
         
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
@@ -1452,44 +1475,47 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
         for location in city_data:
             chat_id = location["chat_id"]
             try:
-                if media_type == "album":
-                    # Забираем корзину с медиа из базы
-                    user_data = db['users'].find_one({"_id": user_id})
-                    media_array = user_data.get("temp_ad_media", [])
+                    media_msg_ids = None # 👈 Переменная для ID альбома
                     
-                    media_list = []
-                    for m in media_array:
-                        if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
-                        else: media_list.append(types.InputMediaVideo(m['id']))
+                    if media_type == "album":
+                        user_data = db['users'].find_one({"_id": user_id})
+                        media_array = user_data.get("temp_ad_media", [])
+                        
+                        media_list = []
+                        for m in media_array:
+                            if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
+                            else: media_list.append(types.InputMediaVideo(m['id']))
+                        
+                        # 1. Отправляем альбом и сохраняем ID каждого отправленного фото
+                        sent_media = bot.send_media_group(chat_id, media_list)
+                        media_msg_ids = [m.message_id for m in sent_media]
+                        
+                        # 2. Следом кидаем текст
+                        sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                        main_msg_id = sent_msg.message_id
+                        
+                    elif media_type == "photo": 
+                        sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                        main_msg_id = sent_msg.message_id
+                    elif media_type == "video": 
+                        sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                        main_msg_id = sent_msg.message_id
+                    else: 
+                        sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                        main_msg_id = sent_msg.message_id
+
+                    # 💥 Пишем в историю, передавая media_msg_ids
+                    add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id, media_message_ids=media_msg_ids)
                     
-                    # 1. Отправляем альбом (ТГ запрещает кнопки на альбомах)
-                    bot.send_media_group(chat_id, media_list)
-                    # 2. Следом кидаем текст с Inline-кнопкой ЛС
-                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
-                    main_msg_id = sent_msg.message_id
-                    
-                elif media_type == "photo": 
-                    sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                    main_msg_id = sent_msg.message_id
-                elif media_type == "video": 
-                    sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                    main_msg_id = sent_msg.message_id
-                else: 
-                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
-                    main_msg_id = sent_msg.message_id
+                    bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
+                    was_published = True
 
-                # Пишем в историю
-                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id)
-                bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
-                was_published = True
+                    if sub and sub.get("has_pin"):
+                        try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
+                        except: pass
 
-                # Проверка на закрепление
-                if sub and sub.get("has_pin"):
-                    try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
-                    except: pass
-
-            except telebot.apihelper.ApiTelegramException as e:
-                bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
+                except telebot.apihelper.ApiTelegramException as e:
+                    bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
 
     ask_for_new_post(message)
 
@@ -1654,12 +1680,17 @@ def process_user_delete_ad(call):
             bot.answer_callback_query(call.id, "❌ Объявление не найдено или уже было удалено.", show_alert=True)
             return
 
-        # 1. Удаляем из Telegram-канала/чата
+        # 1. Удаляем из Telegram-канала/чата текст
         try:
             bot.delete_message(post["chat_id"], post["message_id"])
         except telebot.apihelper.ApiTelegramException as e:
-            # Если пост старше 48 часов или уже удален руками админа в самом канале
-            print(f"Не удалось удалить сообщение {post['message_id']} в чате {post['chat_id']}: {e}")
+            pass
+
+        # 🧹 НОВОЕ: Удаляем привязанный альбом (если есть)
+        if post.get("media_message_ids"):
+            for m_id in post["media_message_ids"]:
+                try: bot.delete_message(post["chat_id"], m_id)
+                except: pass
 
         # 2. Помечаем как удаленное в MongoDB
         ad_posts_collection.update_one({"_id": ObjectId(post_id)}, {"$set": {"deleted": True, "deleted_by": "Юзер"}})
@@ -1706,13 +1737,15 @@ def process_user_delete_all_ads(call):
     
     deleted_count = 0
     for post in posts:
-        # Удаляем из Telegram
-        try:
-            bot.delete_message(post["chat_id"], post["message_id"])
-        except: 
-            pass # Игнорируем ошибки для старых сообщений
+        try: bot.delete_message(post["chat_id"], post["message_id"])
+        except: pass 
         
-        # Обновляем в MongoDB
+        # 🧹 НОВОЕ: Удаляем альбомы
+        if post.get("media_message_ids"):
+            for m_id in post["media_message_ids"]:
+                try: bot.delete_message(post["chat_id"], m_id)
+                except: pass
+        
         ad_posts_collection.update_one({"_id": post["_id"]}, {"$set": {"deleted": True, "deleted_by": "Юзер"}})
         deleted_count += 1
         
@@ -1784,6 +1817,12 @@ def handle_delete_confirmation(call):
             bot.delete_message(post["chat_id"], post["message_id"])
             deleted += 1
         except: pass
+
+        # 🧹 НОВОЕ: Удаляем альбомы
+        if post.get("media_message_ids"):
+            for m_id in post["media_message_ids"]:
+                try: bot.delete_message(post["chat_id"], m_id)
+                except: pass
 
         ad_posts_collection.update_one({"_id": post["_id"]}, {"$set": {"deleted": True, "deleted_by": "Админ"}})
 
@@ -2315,21 +2354,28 @@ def process_autoposts_worker():
                     if not city_data: continue
                     
                     signature = network_signatures.get(net, "")
-                    full_text = f"📢 Объявление от {user_name}:\n\n{post['text']}\n\n{signature}"
+                    full_text = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{post['text']}\n\n{signature}"
                     reply_markup = types.InlineKeyboardMarkup()
                     reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
                     
                     for location in city_data:
                         chat_id = location["chat_id"]
                         try:
+                            media_msg_ids = None # 👈 Добавили переменную для автопостов
+                            
                             if post['media_type'] == "album":
                                 media_list = []
                                 for m in post.get('media_array', []):
                                     if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
                                     else: media_list.append(types.InputMediaVideo(m['id']))
                                 
-                                bot.send_media_group(chat_id, media_list)
+                                # 1. Кидаем медиа и собираем ID
+                                sent_media = bot.send_media_group(chat_id, media_list)
+                                media_msg_ids = [m.message_id for m in sent_media]
+                                
+                                # 2. Следом текст
                                 sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                                
                             elif post['media_type'] == "photo": 
                                 sent_msg = bot.send_photo(chat_id, post['file_id'], caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
                             elif post['media_type'] == "video": 
@@ -2337,7 +2383,8 @@ def process_autoposts_worker():
                             else: 
                                 sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
                             
-                            add_post_to_history(user_id, "Автопост", net, location['name'], chat_id, sent_msg.message_id)
+                            # 💥 Пишем в историю, передавая media_msg_ids (как в ручной публикации!)
+                            add_post_to_history(user_id, "Автопост", net, location['name'], chat_id, sent_msg.message_id, media_message_ids=media_msg_ids)
                             
                             # Проверяем закреп
                             sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети", net]}, "end_date": {"$gt": now_ekb()}})
