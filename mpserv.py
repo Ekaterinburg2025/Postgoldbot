@@ -1475,47 +1475,47 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
         for location in city_data:
             chat_id = location["chat_id"]
             try:
-                    media_msg_ids = None # 👈 Переменная для ID альбома
+                media_msg_ids = None # 👈 Переменная для ID альбома
+                
+                if media_type == "album":
+                    user_data = db['users'].find_one({"_id": user_id})
+                    media_array = user_data.get("temp_ad_media", [])
                     
-                    if media_type == "album":
-                        user_data = db['users'].find_one({"_id": user_id})
-                        media_array = user_data.get("temp_ad_media", [])
-                        
-                        media_list = []
-                        for m in media_array:
-                            if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
-                            else: media_list.append(types.InputMediaVideo(m['id']))
-                        
-                        # 1. Отправляем альбом и сохраняем ID каждого отправленного фото
-                        sent_media = bot.send_media_group(chat_id, media_list)
-                        media_msg_ids = [m.message_id for m in sent_media]
-                        
-                        # 2. Следом кидаем текст
-                        sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
-                        main_msg_id = sent_msg.message_id
-                        
-                    elif media_type == "photo": 
-                        sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                        main_msg_id = sent_msg.message_id
-                    elif media_type == "video": 
-                        sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
-                        main_msg_id = sent_msg.message_id
-                    else: 
-                        sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
-                        main_msg_id = sent_msg.message_id
-
-                    # 💥 Пишем в историю, передавая media_msg_ids
-                    add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id, media_message_ids=media_msg_ids)
+                    media_list = []
+                    for m in media_array:
+                        if m['type'] == 'photo': media_list.append(types.InputMediaPhoto(m['id']))
+                        else: media_list.append(types.InputMediaVideo(m['id']))
                     
-                    bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
-                    was_published = True
+                    # 1. Отправляем альбом и сохраняем ID каждого отправленного фото
+                    sent_media = bot.send_media_group(chat_id, media_list)
+                    media_msg_ids = [m.message_id for m in sent_media]
+                    
+                    # 2. Следом кидаем текст
+                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                    
+                elif media_type == "photo": 
+                    sent_msg = bot.send_photo(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                elif media_type == "video": 
+                    sent_msg = bot.send_video(chat_id, file_id, caption=full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
+                else: 
+                    sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
+                    main_msg_id = sent_msg.message_id
 
-                    if sub and sub.get("has_pin"):
-                        try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
-                        except: pass
+                # 💥 Пишем в историю, передавая media_msg_ids
+                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id, media_message_ids=media_msg_ids)
+                
+                bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
+                was_published = True
 
-                except telebot.apihelper.ApiTelegramException as e:
-                    bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
+                if sub and sub.get("has_pin"):
+                    try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
+                    except: pass
+
+            except telebot.apihelper.ApiTelegramException as e:
+                bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
 
     ask_for_new_post(message)
 
