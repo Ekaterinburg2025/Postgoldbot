@@ -2288,13 +2288,15 @@ def handle_ad_checkout(call):
     if rub_balance >= cost_rub:
         markup.add(types.InlineKeyboardButton(f"💳 Списать с баланса ({cost_rub}₽)", callback_data=f"ad_rubpay_{cost_rub}_{days}_{net_key}_{pin_flag}_{city}"))
     elif rub_balance > 0:
-        markup.add(types.InlineKeyboardButton(f"💳 Баланса не хватает (Твой: {rub_balance}₽)", callback_data="insufficient_funds"))
+        markup.add(types.InlineKeyboardButton(f"💳 Баланс: {rub_balance}₽ (Надо {cost_rub}₽)", callback_data="insufficient_funds"))
 
     # 2. Кнопка оплаты ОЧКАМИ
     if points_balance >= cost_points:
         markup.add(types.InlineKeyboardButton(f"🎰 Оплатить очками ({cost_points} очк.)", callback_data=f"ad_pointspay_{cost_points}_{days}_{net_key}_{pin_flag}_{city}"))
-    elif points_balance > 0:
-        markup.add(types.InlineKeyboardButton(f"🎰 Очков не хватает (Твои: {points_balance})", callback_data="insufficient_funds"))
+    else:
+        # Считаем, сколько не хватает, и кидаем ссылку на Секретаря!
+        missing_points = cost_points - points_balance
+        markup.add(types.InlineKeyboardButton(f"🎰 Не хватает {missing_points} Очков (Играть)", url="https://t.me/FAQMKBOT"))
     # 👆 =================================== 👆
 
     bot.send_invoice(
