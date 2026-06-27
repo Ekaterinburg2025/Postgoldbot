@@ -198,124 +198,50 @@ def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, 
 
 # 🧠 Автогенерация all_cities на основе chat_ids_* и учёта особых случаев
 
-# ==================== СЛОВАРИ ЧАТОВ (Синхронизировано со Скайнетом) ====================
-chat_ids_mk = {
-    "Екатеринбург": -1002210043742,
-    "Челябинск": -1002238514762,
-    "БЕЗ ПРЕДРАССУДКОВ": -1001219669239,
-    "RAINBOW MAN": -1003496028436,
-    "Пермь": -1002205127231,
-    "Ижевск": -1001604781452,
-    "Казань": -1002228881675,
-    "Оренбург": -1002255568202,
-    "Уфа": -1002196469365,
-    "Новосибирск": -1002235645677,
-    "Красноярск": -1002248474008,
-    "Барнаул": -1002234471215,
-    "Омск": -1002151258573,
-    "Саратов": -1002426762134,
-    "Воронеж": -1002207503508,
-    "Самара": -1001852671383,
-    "Волгоград": -1002167762598,
-    "Нижний Новгород": -1001631628911,
-    "Калининград": -1002217056197,
-    "Иркутск": -1002685095003,
-    "Кемерово": -1002147522863,
-    "Москва": -1002208434096,
-    "Санкт-Петербург": -1002485776859,
-    "Общая группа Юга": -1001814693664,
-    "Тюмень": -1002210623988,
-    "ХМАО": -1002210623988,
-    "ЯМАЛ": -1002210623988,
-    "Казахстан": -1003091556050,
-    "Мужской Чат": -1002169723426,
-    "Фетиши": -1002197215824,
-    "Аренда Жилья": -1001238252865,
-    "Секс Туризм": -1002236337328,
-    "Галерея": -1002217967528,
-    "Тестовая группа 🛠️": -1002426733876
-}
+# === 🌍 УМНАЯ ЗАГРУЗКА МАТРИЦЫ ИЗ БАЗЫ ДАННЫХ (ЦУП) ===
+try:
+    infra = db['settings'].find_one({"_id": "infrastructure"}) or {}
+    networks = infra.get("networks", {})
+    
+    def list_to_dict(chat_list):
+        return {item["name"]: int(item["id"]) for item in chat_list}
 
-chat_ids_parni = {
-    "Екатеринбург": -1002413948841,
-    "Тюмень": -1002255622479,
-    "Омск": -1002274367832,
-    "Челябинск": -1002406302365,
-    "Пермь": -1002280860973,
-    "Курган": -1002469285352,
-    "ХМАО": -1002287709568,
-    "Уфа": -1002448909000,
-    "Новосибирск": -1002261777025,
-    "ЯМАЛ": -1002371438340,
-    "Оренбург": -1003888335997,
-    "Москва": -1003856528145,
-    "Санкт-Петербург": -1003519420984,
-    "Красноярск": -1003347456711
-}
+    chat_ids_parni = list_to_dict(networks.get("parni", []))
+    chat_ids_mk = list_to_dict(networks.get("mk", []))
+    chat_ids_ns = list_to_dict(networks.get("ns", []))
+    chat_ids_rainbow = list_to_dict(networks.get("rainbow", []))
+    chat_ids_gayznak = list_to_dict(networks.get("gayznak", []))
+    
+    NON_CITIES = [
+        "БЕЗ ПРЕДРАССУДКОВ", "RAINBOW MAN", "Мужской Чат", "Фетиши", 
+        "Аренда Жилья", "Секс Туризм", "Галерея", "Тестовая группа 🛠️"
+    ]
+    
+    all_cities = {}
+    def insert_to_all(city, net_key, real_name, chat_id):
+        if city in NON_CITIES: return
+        clean_city = city.replace(" 2", "")
+        if clean_city not in all_cities:
+            all_cities[clean_city] = {}
+        if net_key not in all_cities[clean_city]:
+            all_cities[clean_city][net_key] = []
+        all_cities[clean_city][net_key].append({"name": real_name, "chat_id": chat_id})
 
-chat_ids_ns = {
-    "Новосибирск": -1001824149334,
-    "Челябинск": -1002233108474,
-    "Пермь": -1001753881279,
-    "Уфа": -1001823390636,
-    "ЯМАЛ": -1002145851794,
-    "Москва": -1001938448310,
-    "ХМАО": -1001442597049,
-    "Екатеринбург": -1002169473861,
-    "Тюмень": -1002170955867,
-    "Санкт-Петербург": -1002335014334,
-    "Тюмень 2": -1001427433513,
-    "Челябинск 2": -1002193127380
-}
+    for city, chat_id in chat_ids_mk.items(): insert_to_all(city, "mk", city, chat_id)
+    for city, chat_id in chat_ids_parni.items(): insert_to_all(city, "parni", city, chat_id)
+    for city, chat_id in chat_ids_ns.items(): insert_to_all(city, "ns", city, chat_id)
+    for city, chat_id in chat_ids_rainbow.items(): insert_to_all(city, "rainbow", city, chat_id)
+    for city, chat_id in chat_ids_gayznak.items(): insert_to_all(city, "gayznak", city, chat_id)
 
-chat_ids_rainbow = {
-    "Екатеринбург": -1002419653224
-}
+    print("✅ Рекламный бот успешно загрузил Матрицу городов из MongoDB!")
 
-chat_ids_gayznak = {
-    "Красноярск": -1002335149925,
-    "Екатеринбург": -1002571605722,
-    "Пермь": -1002599206099,
-    "Тюмень": -1002553431228,
-    "Новосибирск": -1002627786446,
-    "Самара": -1002301984331,
-    "Казань": -1002277433049,
-    "Воронеж": -1002428155161,
-    "Кемерово": -1002418700136,
-    "Иркутск": -1002454522264,
-    "Челябинск": -1003366643944,
-    "Орёл": -1003323558103,
-    "Саратов": -1003638608363,
-    "Архангельск": -1003120218775,
-    "Ярославль": -1003332193158,
-    "Тверь": -1003369813272,
-    "Великий Новгород": -1003429766543,
-    "Владимир": -1003276544901,
-    "Мурманск": -1003302580641,
-    "Рязань": -1003460247519,
-    "Смоленск": -1003423811230,
-    "Тамбов": -1003225139634,
-    "Липецк": -1003487872172,
-    "Тула": -1003482077625,
-    "Брянск": -1003372917376,
-    "Волгоград": -1002476113714
-}
+except Exception as e:
+    print(f"⚠️ Ошибка загрузки матрицы: {e}. Используются пустые словари.")
+    chat_ids_parni, chat_ids_mk, chat_ids_ns, chat_ids_rainbow, chat_ids_gayznak = {}, {}, {}, {}, {}
+    all_cities = {}
 
-all_cities = {}
-
-def insert_to_all(city, net_key, real_name, chat_id):
-    clean_city = city.replace(" 2", "")
-    if clean_city not in all_cities:
-        all_cities[clean_city] = {}
-    if net_key not in all_cities[clean_city]:
-        all_cities[clean_city][net_key] = []
-    all_cities[clean_city][net_key].append({"name": real_name, "chat_id": chat_id})
-
-for city, chat_id in chat_ids_mk.items(): insert_to_all(city, "mk", city, chat_id)
-for city, chat_id in chat_ids_parni.items(): insert_to_all(city, "parni", city, chat_id)
-for city, chat_id in chat_ids_ns.items(): insert_to_all(city, "ns", city, chat_id)
-for city, chat_id in chat_ids_rainbow.items(): insert_to_all(city, "rainbow", city, chat_id)
-for city, chat_id in chat_ids_gayznak.items(): insert_to_all(city, "gayznak", city, chat_id)
+PARNI_CHATS = list(chat_ids_parni.values())
+# ===================================================================
 
 # Статичные подписи для каждой сети с новой строкой и дополнительной подписью
 network_signatures = {
@@ -2577,6 +2503,19 @@ def process_autoposts_worker():
 
 # 👇 ЗАПУСКАЕМ НАШ НОВЫЙ ПОТОК (Вставить перед if __name__ == '__main__':)
 threading.Thread(target=process_autoposts_worker, daemon=True).start()
+
+# === ДАТЧИК ПУЛЬСА РЕКЛАМНОГО БОТА ===
+def heartbeat_ads():
+    import time
+    while True:
+        try:
+            db['settings'].update_one({"_id": "bot_status"}, {"$set": {"ads_last_seen": time.time()}}, upsert=True)
+        except: pass
+        time.sleep(60)
+
+import threading
+threading.Thread(target=heartbeat_ads, daemon=True).start()
+# ====================================
 
 if __name__ == '__main__':
     print("✅ Скайнет-Модуль mpserv запущен!")
