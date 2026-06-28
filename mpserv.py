@@ -199,48 +199,64 @@ def add_post_to_history(user_id, user_name, network, city, chat_id, message_id, 
 # 🧠 Автогенерация all_cities на основе chat_ids_* и учёта особых случаев
 
 # === 🌍 УМНАЯ ЗАГРУЗКА МАТРИЦЫ ИЗ БАЗЫ ДАННЫХ (ЦУП) ===
-try:
-    infra = db['settings'].find_one({"_id": "infrastructure"}) or {}
-    networks = infra.get("networks", {})
-    
-    def list_to_dict(chat_list):
-        return {item["name"]: int(item["id"]) for item in chat_list}
+chat_ids_parni, chat_ids_mk, chat_ids_ns, chat_ids_rainbow, chat_ids_gayznak = {}, {}, {}, {}, {}
+all_cities = {}
+PARNI_CHATS = []
+BIG_CHATS = []
 
-    chat_ids_parni = list_to_dict(networks.get("parni", []))
-    chat_ids_mk = list_to_dict(networks.get("mk", []))
-    chat_ids_ns = list_to_dict(networks.get("ns", []))
-    chat_ids_rainbow = list_to_dict(networks.get("rainbow", []))
-    chat_ids_gayznak = list_to_dict(networks.get("gayznak", []))
-    
-    NON_CITIES = [
-        "БЕЗ ПРЕДРАССУДКОВ", "RAINBOW MAN", "Мужской Чат", "Фетиши", 
-        "Аренда Жилья", "Секс Туризм", "Галерея", "Тестовая группа 🛠️"
-    ]
-    
-    all_cities = {}
-    def insert_to_all(city, net_key, real_name, chat_id):
-        if city in NON_CITIES: return
-        clean_city = city.replace(" 2", "")
-        if clean_city not in all_cities:
-            all_cities[clean_city] = {}
-        if net_key not in all_cities[clean_city]:
-            all_cities[clean_city][net_key] = []
-        all_cities[clean_city][net_key].append({"name": real_name, "chat_id": chat_id})
+def refresh_matrix():
+    global all_cities, chat_ids_parni, chat_ids_mk, chat_ids_ns, chat_ids_rainbow, chat_ids_gayznak, PARNI_CHATS, BIG_CHATS
+    try:
+        infra = db['settings'].find_one({"_id": "infrastructure"}) or {}
+        networks = infra.get("networks", {})
+        
+        def list_to_dict(chat_list):
+            return {item["name"]: int(item["id"]) for item in chat_list}
 
-    for city, chat_id in chat_ids_mk.items(): insert_to_all(city, "mk", city, chat_id)
-    for city, chat_id in chat_ids_parni.items(): insert_to_all(city, "parni", city, chat_id)
-    for city, chat_id in chat_ids_ns.items(): insert_to_all(city, "ns", city, chat_id)
-    for city, chat_id in chat_ids_rainbow.items(): insert_to_all(city, "rainbow", city, chat_id)
-    for city, chat_id in chat_ids_gayznak.items(): insert_to_all(city, "gayznak", city, chat_id)
+        chat_ids_parni = list_to_dict(networks.get("parni", []))
+        chat_ids_mk = list_to_dict(networks.get("mk", []))
+        chat_ids_ns = list_to_dict(networks.get("ns", []))
+        chat_ids_rainbow = list_to_dict(networks.get("rainbow", []))
+        chat_ids_gayznak = list_to_dict(networks.get("gayznak", []))
+        
+        NON_CITIES = [
+            "БЕЗ ПРЕДРАССУДКОВ", "RAINBOW MAN", "Мужской Чат", "Фетиши", 
+            "Аренда Жилья", "Секс Туризм", "Галерея", "Тестовая группа 🛠️"
+        ]
+        
+        temp_all_cities = {}
+        def insert_to_all(city, net_key, real_name, chat_id):
+            if city in NON_CITIES: return
+            clean_city = city.replace(" 2", "")
+            if clean_city not in temp_all_cities:
+                temp_all_cities[clean_city] = {}
+            if net_key not in temp_all_cities[clean_city]:
+                temp_all_cities[clean_city][net_key] = []
+            temp_all_cities[clean_city][net_key].append({"name": real_name, "chat_id": chat_id})
 
-    print("✅ Рекламный бот успешно загрузил Матрицу городов из MongoDB!")
+        for city, chat_id in chat_ids_mk.items(): insert_to_all(city, "mk", city, chat_id)
+        for city, chat_id in chat_ids_parni.items(): insert_to_all(city, "parni", city, chat_id)
+        for city, chat_id in chat_ids_ns.items(): insert_to_all(city, "ns", city, chat_id)
+        for city, chat_id in chat_ids_rainbow.items(): insert_to_all(city, "rainbow", city, chat_id)
+        for city, chat_id in chat_ids_gayznak.items(): insert_to_all(city, "gayznak", city, chat_id)
 
-except Exception as e:
-    print(f"⚠️ Ошибка загрузки матрицы: {e}. Используются пустые словари.")
-    chat_ids_parni, chat_ids_mk, chat_ids_ns, chat_ids_rainbow, chat_ids_gayznak = {}, {}, {}, {}, {}
-    all_cities = {}
+        all_cities = temp_all_cities
+        PARNI_CHATS = list(chat_ids_parni.values())
+        
+        # Обновляем BIG_CHATS
+        BIG_CHATS = [
+            chat_ids_mk.get("БЕЗ ПРЕДРАССУДКОВ"), chat_ids_mk.get("Галерея"),
+            chat_ids_mk.get("Мужской Чат"), chat_ids_mk.get("Фетиши"),
+            chat_ids_mk.get("Аренда Жилья"), chat_ids_mk.get("Секс Туризм")
+        ]
+        # Очищаем от None, если какие-то чаты не найдены
+        BIG_CHATS = [cid for cid in BIG_CHATS if cid is not None]
 
-PARNI_CHATS = list(chat_ids_parni.values())
+    except Exception as e:
+        print(f"⚠️ Ошибка обновления матрицы: {e}.")
+
+# Делаем первичную загрузку при старте сервера
+refresh_matrix()
 # ===================================================================
 
 # Статичные подписи для каждой сети с новой строкой и дополнительной подписью
@@ -278,16 +294,6 @@ ad_top_stickers = (
     '<tg-emoji emoji-id="5199909809981237698">🔥</tg-emoji>'
     '<tg-emoji emoji-id="5201849382852372388">🔥</tg-emoji>\n\n'
 )
-
-# ==================== БИГ-ЧАТЫ И ЦЕНООБРАЗОВАНИЕ ====================
-BIG_CHATS = [
-    chat_ids_mk.get("БЕЗ ПРЕДРАССУДКОВ"),
-    chat_ids_mk.get("Галерея"),
-    chat_ids_mk.get("Мужской Чат"),
-    chat_ids_mk.get("Фетиши"),
-    chat_ids_mk.get("Аренда Жилья"),
-    chat_ids_mk.get("Секс Туризм")
-]
 
 def get_price_for_chat(chat_id, days):
     """Динамический расчет стоимости рекламы из MongoDB"""
@@ -511,6 +517,8 @@ def admin_panel(message):
     if not is_admin(message.chat.id):
         bot.send_message(message.chat.id, "⛔ У вас нет прав для выполнения этой команды.")
         return
+
+    refresh_matrix() # <--- ДОБАВИТЬ ЭТУ СТРОКУ
 
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("➕ Добавить оплатившего", callback_data="admin_add_paid_user"))
@@ -996,6 +1004,9 @@ def get_user_html_link(user):
 @bot.message_handler(func=lambda message: message.text == "Создать новое объявление")
 def create_new_post_category(message):
     if message.chat.type != "private": return
+    
+    # 👇 Обновляем города из базы данных прямо сейчас! 👇
+    refresh_matrix() 
     
     # 🧹 ОЧИЩАЕМ КОРЗИНУ (чтобы бот забыл старые посты/шаблоны)
     db['users'].update_one(
@@ -2407,6 +2418,7 @@ def process_autoposts_worker():
     """Фоновый поток: публикует отложенные посты каждые X часов"""
     while True:
         try:
+            refresh_matrix() # <--- ДОБАВИТЬ ЭТУ СТРОКУ СЮДА
             now = now_ekb()
             ready_posts = list(autopost_queue.find({"next_run": {"$lte": now}, "posts_left": {"$gt": 0}}))
             
