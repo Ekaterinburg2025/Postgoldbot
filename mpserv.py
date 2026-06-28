@@ -227,7 +227,7 @@ def refresh_matrix():
         temp_all_cities = {}
         def insert_to_all(city, net_key, real_name, chat_id):
             if city in NON_CITIES: return
-            clean_city = city.replace(" 2", "")
+            clean_city = re.sub(r'\s*\d+$', '', city).strip()
             if clean_city not in temp_all_cities:
                 temp_all_cities[clean_city] = {}
             if net_key not in temp_all_cities[clean_city]:
