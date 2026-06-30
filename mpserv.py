@@ -204,30 +204,46 @@ all_cities = {}
 PARNI_CHATS = []
 BIG_CHATS = []
 
+def get_live_network_chats(network_key):
+    """Универсальный парсер баз данных (как в основном боте)"""
+    infra = db['settings'].find_one({"_id": "infrastructure"}) or {}
+    networks = infra.get("networks", {})
+    chats_data = networks.get(network_key)
+    result = {}
+    if isinstance(chats_data, list):
+        for item in chats_data:
+            if isinstance(item, dict):
+                name = item.get("name", item.get("city", "Безымянный Город"))
+                chat_id = item.get("id", item.get("chat_id", item.get("_id")))
+                if chat_id: result[str(name)] = chat_id
+    elif isinstance(chats_data, dict):
+        for k, v in chats_data.items():
+            if isinstance(v, dict): result[str(k)] = v.get("id", 0)
+            else: result[str(k)] = v
+    return result
+
 def refresh_matrix():
     global all_cities, chat_ids_parni, chat_ids_mk, chat_ids_ns, chat_ids_rainbow, chat_ids_gayznak, PARNI_CHATS, BIG_CHATS
     try:
-        infra = db['settings'].find_one({"_id": "infrastructure"}) or {}
-        networks = infra.get("networks", {})
-        
-        def list_to_dict(chat_list):
-            return {item["name"]: int(item["id"]) for item in chat_list}
-
-        chat_ids_parni = list_to_dict(networks.get("parni", []))
-        chat_ids_mk = list_to_dict(networks.get("mk", []))
-        chat_ids_ns = list_to_dict(networks.get("ns", []))
-        chat_ids_rainbow = list_to_dict(networks.get("rainbow", []))
-        chat_ids_gayznak = list_to_dict(networks.get("gayznak", []))
+        chat_ids_parni = get_live_network_chats("parni")
+        chat_ids_mk = get_live_network_chats("mk")
+        chat_ids_ns = get_live_network_chats("ns")
+        chat_ids_rainbow = get_live_network_chats("rainbow")
+        chat_ids_gayznak = get_live_network_chats("gayznak")
         
         NON_CITIES = [
             "БЕЗ ПРЕДРАССУДКОВ", "RAINBOW MAN", "Мужской Чат", "Фетиши", 
-            "Аренда Жилья", "Секс Туризм", "Галерея", "Тестовая группа 🛠️"
+            "Аренда Жилья", "Секс Туризм", "Галерея", "Тестовая группа 🛠️",
+            "Общая группа Юга", "Казахстан", "ХМАО", "ЯМАЛ"
         ]
         
         temp_all_cities = {}
         def insert_to_all(city, net_key, real_name, chat_id):
-            if city in NON_CITIES: return
-            clean_city = re.sub(r'\s*\d+$', '', city).strip()
+            if city in NON_CITIES or str(city).startswith("⚠️"): return
+            
+            # 🔥 БРОНЕБОЙНОЕ ОТРЕЗАНИЕ ЦИФР (Челябинск 3, Челябинск3, Челябинск 3  -> Челябинск)
+            clean_city = re.sub(r'\s*\d+\s*$', '', str(city)).strip()
+            
             if clean_city not in temp_all_cities:
                 temp_all_cities[clean_city] = {}
             if net_key not in temp_all_cities[clean_city]:
@@ -249,11 +265,11 @@ def refresh_matrix():
             chat_ids_mk.get("Мужской Чат"), chat_ids_mk.get("Фетиши"),
             chat_ids_mk.get("Аренда Жилья"), chat_ids_mk.get("Секс Туризм")
         ]
-        # Очищаем от None, если какие-то чаты не найдены
+        # Очищаем от пустых значений
         BIG_CHATS = [cid for cid in BIG_CHATS if cid is not None]
 
     except Exception as e:
-        print(f"⚠️ Ошибка обновления матрицы: {e}.")
+        print(f"⚠️ Ошибка обновления матрицы: {e}")
 
 # Делаем первичную загрузку при старте сервера
 refresh_matrix()
