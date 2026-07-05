@@ -460,15 +460,23 @@ def get_user_statistics(user_id):
             "time": {"$gte": today_start}
         })
 
+        # 👇 ИСПРАВЛЕНИЕ: Учитываем кластеры (Тюмень 1, Тюмень 2) 👇
+        net_key = normalize_network_key(network)
+        city_group = all_cities.get(city, {}).get(net_key, [])
+        group_size = len(city_group) if len(city_group) > 0 else 1
+        
+        actual_pushes = today_posts_count // group_size
+        # 👆 ==================================================== 👆
+
         limit_total += 3
         if network not in stats["details"]:
             stats["details"][network] = {}
 
         stats["details"][network][city] = {
-            "published": today_posts_count,
-            "remaining": max(0, 3 - today_posts_count)
+            "published": actual_pushes,
+            "remaining": max(0, 3 - actual_pushes)
         }
-        stats["published"] += today_posts_count
+        stats["published"] += actual_pushes
 
     stats["remaining"] = max(0, limit_total - stats["published"])
     return stats
@@ -1454,7 +1462,7 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
                     main_msg_id = sent_msg.message_id
 
                 # 💥 Пишем в историю, передавая media_msg_ids
-                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, location['name'], chat_id, main_msg_id, media_message_ids=media_msg_ids)
+                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, city, chat_id, main_msg_id, media_message_ids=media_msg_ids)
                 
                 bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
                 was_published = True
@@ -2450,7 +2458,12 @@ def process_autoposts_worker():
 
                 # 2. Проверяем лимит 3 поста на сегодня
                 user_stats = get_user_statistics(user_id)
-                city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
+                
+                # 👇 ИСПРАВЛЕНИЕ: Проверка лимитов для "Всех сетей" 👇
+                check_net = "Мужской Клуб" if network == "Все сети" else network
+                city_stats = user_stats.get("details", {}).get(check_net, {}).get(city, {})
+                # 👆 ============================================== 👆
+                
                 if city_stats.get("remaining", 0) <= 0:
                     # Лимит исчерпан. Переносим попытку на завтра (на утро)
                     autopost_queue.update_one(
@@ -2504,7 +2517,7 @@ def process_autoposts_worker():
                                 sent_msg = bot.send_message(chat_id, full_text, parse_mode="HTML", reply_markup=reply_markup)
                             
                             # 💥 Пишем в историю, передавая media_msg_ids (как в ручной публикации!)
-                            add_post_to_history(user_id, "Автопост", net, location['name'], chat_id, sent_msg.message_id, media_message_ids=media_msg_ids)
+                            add_post_to_history(user_id, "Автопост", net, city, chat_id, sent_msg.message_id, media_message_ids=media_msg_ids)
                             
                             # Проверяем закреп
                             sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети", net]}, "end_date": {"$gt": now_ekb()}})
