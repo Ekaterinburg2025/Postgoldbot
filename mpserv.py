@@ -2460,7 +2460,13 @@ def process_autoposts_worker():
                 user_stats = get_user_statistics(user_id)
                 
                 # 👇 ИСПРАВЛЕНИЕ: Проверка лимитов для "Всех сетей" 👇
-                check_net = "Мужской Клуб" if network == "Все сети" else network
+                if network == "Все сети":
+                    # Ищем первую сеть, которая физически существует в этом городе
+                    available_nets = [n for n in ["Мужской Клуб", "ПАРНИ 18+", "НС", "Радуга", "Гей Знакомства"] if normalize_network_key(n) in all_cities.get(city, {})]
+                    check_net = available_nets[0] if available_nets else "Мужской Клуб"
+                else:
+                    check_net = network
+                
                 city_stats = user_stats.get("details", {}).get(check_net, {}).get(city, {})
                 # 👆 ============================================== 👆
                 
