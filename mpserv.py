@@ -146,6 +146,7 @@ admins_collection = db['admins']            # НОВАЯ: Список адми�
 
 # ADMIN ID (ваш ID)
 ADMIN_CHAT_ID = -1002196190507
+ADS_THREAD_ID = 263952  # 👈 Добавляем ID папки Рекламы
 
 # 🔒 Вечные (статичные) админы
 CORE_ADMINS = [479938867, 7235010425]
@@ -593,7 +594,15 @@ def handle_vip_moderation(call):
         
         # 3. Убираем кнопки у админа, чтобы не нажать дважды
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        bot.send_message(call.message.chat.id, f"✅ <b>Заявка ОДОБРЕНА (Пользователь ID: <code>{user_id}</code>)</b>", reply_to_message_id=call.message.message_id, parse_mode="HTML")
+        try:
+            bot.send_message(
+                call.message.chat.id, 
+                f"✅ <b>Заявка ОДОБРЕНА (Пользователь ID: <code>{user_id}</code>)</b>", 
+                reply_to_message_id=call.message.message_id, 
+                parse_mode="HTML",
+                message_thread_id=ADS_THREAD_ID # 👈 Указываем топик
+            )
+        except: pass
 
     elif action == "reject":
         # Убираем статус на всякий случай
@@ -604,7 +613,15 @@ def handle_vip_moderation(call):
         
         # Убираем кнопки у админа
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        bot.send_message(call.message.chat.id, f"❌ <b>Заявка ОТКЛОНЕНА (Пользователь ID: <code>{user_id}</code>)</b>", reply_to_message_id=call.message.message_id, parse_mode="HTML")
+        try:
+            bot.send_message(
+                call.message.chat.id, 
+                f"❌ <b>Заявка ОТКЛОНЕНА (Пользователь ID: <code>{user_id}</code>)</b>", 
+                reply_to_message_id=call.message.message_id, 
+                parse_mode="HTML",
+                message_thread_id=ADS_THREAD_ID # 👈 Указываем топик
+            )
+        except: pass
 
 # --- СТАРТ ПОСЛЕ ОДОБРЕНИЯ ---
 @bot.callback_query_handler(func=lambda call: call.data == "start_vip_payment")
@@ -1079,12 +1096,16 @@ def request_vip_approval(message):
         types.InlineKeyboardButton("✅ Одобрить", callback_data=f"vip_approve_{user_id}"),
         types.InlineKeyboardButton("❌ Отклонить", callback_data=f"vip_reject_{user_id}")
     )
-    bot.send_message(
-        ADMIN_CHAT_ID,
-        f"🚨 <b>Новая заявка на VIP-рекламу!</b>\n👤 Пользователь: <a href='tg://user?id={user_id}'>{user_name}</a> (<code>{user_id}</code>)\n🔗 Ссылка: {escape_html(link)}",
-        parse_mode="HTML",
-        reply_markup=markup
-    )
+    try:
+        bot.send_message(
+            ADMIN_CHAT_ID,
+            f"🚨 <b>Новая заявка на VIP-рекламу!</b>\n👤 Пользователь: <a href='tg://user?id={user_id}'>{user_name}</a> (<code>{user_id}</code>)\n🔗 Ссылка: {escape_html(link)}",
+            parse_mode="HTML",
+            reply_markup=markup,
+            message_thread_id=ADS_THREAD_ID # 👈 Отправляем в папку рекламы
+        )
+    except Exception as e:
+        print(f"Ошибка отправки заявки VIP-рекламы в топик: {e}")
 
     # 2. Успокаиваем пользователя
     bot.send_message(message.chat.id, "⏳ <b>Заявка отправлена на модерацию.</b>\nКак только администратор проверит ресурс, вы получите уведомление!", parse_mode="HTML", reply_markup=get_main_keyboard())
