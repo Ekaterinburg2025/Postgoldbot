@@ -1880,10 +1880,28 @@ def crypto_webhook():
     if request.method == 'GET':
         return "✅ CryptoBot Webhook активен и ждет оплат!", 200
 
+    # 🔐 Проверка подписи CryptoBot. Раньше любой мог отправить сюда «оплату» POST-запросом
+    # и получить рекламный доступ бесплатно.
+    import hmac, hashlib, json as _json
+    raw = request.get_data()
+    token = os.getenv("CRYPTO_TOKEN", "")
+    sig = request.headers.get("crypto-pay-api-signature", "")
+    expected = hmac.new(hashlib.sha256(token.encode()).digest(), raw, hashlib.sha256).hexdigest() if token else ""
+    if not token or not sig or not hmac.compare_digest(expected, sig):
+        return 'forbidden', 403
+
     try:
-        # silent=True не даст боту упасть, если придет битый запрос
-        data = request.get_json(silent=True)
-        
+        data = _json.loads(raw or b"{}")
+
+        # Один счёт обрабатываем один раз (общая коллекция со Скайнетом)
+        if data and data.get("update_type") == "invoice_paid":
+            inv_id = str((data.get("payload") or {}).get("invoice_id") or "")
+            if inv_id:
+                try:
+                    db['crypto_payments'].insert_one({"_id": inv_id, "payload": data["payload"].get("payload"), "ts": time.time(), "by": "mp"})
+                except pymongo.errors.DuplicateKeyError:
+                    return 'ok', 200
+
         # CryptoBot присылает событие invoice_paid, когда счет оплачен
         if data and data.get("update_type") == "invoice_paid":
             # Достаем наш спрятанный payload (он выглядит как payload___user_id)
