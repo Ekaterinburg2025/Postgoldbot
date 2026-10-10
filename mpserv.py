@@ -2291,7 +2291,7 @@ def handle_ad_checkout(call):
     points_balance = paid_user.get("bounty_points", 0) if paid_user else 0 
     
     # Считаем стоимость тарифа во внутренних валютах
-    cost_rub = int(amount * 1.8) # Курс: 1 звезда = 1.8₽
+    cost_rub = int(amount * _rub_per_star())  # курс — в панели Скайнета /glaz
     cost_points = amount * 5    # Курс: 1 звезда = 5 очков
     pin_flag = "1" if is_pin else "0"
     
@@ -2385,7 +2385,7 @@ def handle_ecosystem_payment(call):
         update_field = "cashback_balance"
         currency_name = "₽"
         revenue_type = "ads_rub_balance"
-        equivalent_stars = int(cost / 1.8) # Возвращаем в звезды для бухгалтерии
+        equivalent_stars = int(cost / _rub_per_star())  # Возвращаем в звезды для бухгалтерии
 
     # Проверка на случай, если баланс изменился пока висело меню
     if current_funds < cost:
