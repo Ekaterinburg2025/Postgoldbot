@@ -10,12 +10,28 @@ from urllib.parse import quote
 import requests
 
 
+# 👇 Курс рублей за звезду из веб-панели Скайнета (/glaz → «🎛 Управление»), кэш 20 сек
+_rate_cache = {"t": 0.0, "v": 2.0}
+
+
+def _rub_per_star():
+    if time.time() - _rate_cache["t"] > 20:
+        _rate_cache["t"] = time.time()
+        try:
+            doc = db['settings'].find_one({"_id": "config"}) or {}
+            v = float(doc.get("rub_per_star") or 2.0)
+            _rate_cache["v"] = v if v > 0 else 2.0
+        except Exception:
+            pass
+    return _rate_cache["v"]
+
+
 # 👇 УНИВЕРСАЛЬНЫЙ КАССИР CRYPTOBOT (ДЛЯ РЕКЛАМЫ И ШТРАФОВ) 👇
 def get_crypto_pay_url(custom_payload, amount_stars, description, asset=None):
     import os
     import requests
     
-    amount_rub = int(amount_stars * 1.8)
+    amount_rub = int(amount_stars * _rub_per_star())  # курс — в панели Скайнета /glaz
     API_TOKEN = os.getenv("CRYPTO_TOKEN")
     
     if not API_TOKEN:
