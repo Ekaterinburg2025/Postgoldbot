@@ -399,10 +399,17 @@ function stepWhere() {
   if (w.net === "all") h += `<div class="note gold small" style="margin-top:0">«Все сети» — объявление выходит во всех сетях города. Скидка за пакет: 3 сети −10%, 4 — −20%, 5 — −30%.</div>`;
   h += `<div class="panel">` + (list.length ? list.map(c => {
     const p = paid(c.name);
-    return `<button class="row" onclick="pickCity('${esc(c.token)}')"><div class="grow"><div class="title">${esc(c.name)}</div><div class="sub">${c.chats} ${plural(c.chats, "чат", "чата", "чатов")}${w.net === "all" ? ", сетей: " + c.nets.length : ""}</div></div>${p ? `<span class="paidmark">оплачено</span>` : ""}<span class="chev">›</span></button>`;
+    return `<button class="row" onclick="pickCity('${esc(c.token)}')"><div class="grow"><div class="title">${esc(c.name)}</div><div class="sub">${chatsLabel(c, w.net)}</div></div>${p ? `<span class="paidmark">оплачено</span>` : ""}<span class="chev">›</span></button>`;
   }).join("") : `<div class="row muted">Ничего не нашлось</div>`) + `</div>`;
   $("#wbody").innerHTML = h;
   const q = $("#q"); q.oninput = () => { w.q = q.value; const pos = q.selectionStart; stepWhere(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); };
+}
+function chatsLabel(c, net) {
+  const counts = c.counts || {};
+  if (net !== "all") { const n = counts[net] || 0; return `${n} ${plural(n, "чат", "чата", "чатов")} в сети`; }
+  // «Все сети»: сколько сетей и чатов всего, плюс разбивка по сетям
+  const parts = c.nets.map(k => `${netName(k)} ${counts[k] || 0}`);
+  return `${c.nets.length} ${plural(c.nets.length, "сеть", "сети", "сетей")}, ${c.chats} ${plural(c.chats, "чат", "чата", "чатов")}: ${esc(parts.join(", "))}`;
 }
 function pickNet(k) { S.w.net = k; haptic(); stepWhere(); }
 async function pickCity(tok) {

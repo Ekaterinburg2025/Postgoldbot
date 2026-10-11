@@ -230,6 +230,7 @@ def register_cabinet(app, mp):
             nets = mp.city_net_keys(name)
             if nets:
                 cities.append({"name": name, "token": mp.city_token(name), "nets": nets,
+                               "counts": {k: len(mp.all_cities[name][k]) for k in nets},   # чатов в каждой сети
                                "chats": sum(len(mp.all_cities[name][k]) for k in nets)})
         udoc = db['users'].find_one({"_id": u.id}, {"temp_ad_type": 1}) or {}
         return jsonify({
