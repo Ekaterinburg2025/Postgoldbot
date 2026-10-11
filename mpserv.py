@@ -2469,8 +2469,16 @@ threading.Thread(target=_setup_public_urls, daemon=True).start()
 
 
 @app.route('/')
+@app.route('/app')
 def index():
-    return '✅ Бот запущен и работает!'
+    # Если в BotFather адрес мини-аппа указан без /cabinet, Telegram открывает корень сайта.
+    # Перекидываем в кабинет, сохраняя данные Telegram (они в #хэше адреса). Пинги/мониторинг
+    # по-прежнему получают 200 и текст «Бот запущен».
+    return ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Рекламный кабинет</title>'
+            '<script>if(location.hash.indexOf("tgWebApp")>-1||location.search.indexOf("tgWebApp")>-1)'
+            '{location.replace("/cabinet"+location.search+location.hash)}</script>'
+            '<body style="font-family:system-ui;padding:16px">✅ Бот запущен и работает!</body>'), 200
 
 
 @app.route('/crypto_webhook', methods=['GET', 'POST'])
