@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Рекламный кабинет</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f2f2f6);
+  --text: var(--tg-theme-text-color, #16161a);
+  --hint: var(--tg-theme-hint-color, #8a8a93);
+  --link: var(--tg-theme-link-color, #2a7de1);
+  --btn: var(--tg-theme-button-color, #2a7de1);
+  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --sep: color-mix(in srgb, var(--hint) 22%, transparent);
+  --gold: #b9862a;
+  --gold-hi: #e8c76a;
+  --gold-ink: #2b1d04;
+  --gold-soft: color-mix(in srgb, #c9952f 14%, var(--bg));
+  --ok: #2c9a64;
+  --bad: #d4453a;
+  --r-lg: 18px; --r-md: 12px; --r-sm: 9px;
+  --display: "Unbounded", "Manrope", system-ui, sans-serif;
+  --ui: "Manrope", -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+}
+html.dark{ --gold:#e2b653; --gold-soft: color-mix(in srgb, #e2b653 12%, var(--bg)); }
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg2);color:var(--text);font:15px/1.45 var(--ui)}
+body{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none;padding:0}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+a{color:var(--link)}
+.wrap{max-width:560px;margin:0 auto;padding:14px 16px 24px}
+h1{font:700 22px/1.2 var(--ui);margin:6px 0 4px;letter-spacing:-.01em}
+h2{font:700 17px/1.3 var(--ui);margin:22px 4px 10px}
+.muted{color:var(--hint)}
+.small{font-size:13px}
+.num{font-family:var(--display);font-weight:700;letter-spacing:-.01em}
+
+/* шапка */
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.wallet{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:600}
+.chip b{font-family:var(--display);font-weight:500}
+
+/* блок-подложка */
+.panel{background:var(--bg);border-radius:var(--r-lg);padding:4px 0;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:52px}
+.row + .row{border-top:1px solid var(--sep)}
+.row .grow{flex:1;min-width:0}
+.row .title{font-weight:600}
+.row .sub{font-size:13px;color:var(--hint)}
+button.row{width:100%;text-align:left}
+button.row:active{background:var(--bg2)}
+.chev{color:var(--hint);font-size:18px}
+
+/* пропуск-билет — главная деталь */
+.pass{position:relative;background:var(--bg);border-radius:var(--r-lg);margin-bottom:12px;overflow:hidden}
+.pass .body{padding:16px 16px 14px}
+.pass .head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.pass .net{font-weight:700;font-size:16px}
+.pass .city{color:var(--hint);font-size:14px}
+.pass .left{text-align:right}
+.pass .left .num{font-size:26px;line-height:1}
+.pass .left .unit{font-size:12px;color:var(--hint)}
+.pass .bar{height:6px;border-radius:6px;background:var(--bg2);margin:14px 0 10px;overflow:hidden}
+.pass .bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--gold),var(--gold-hi))}
+.pass .meta{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px;color:var(--hint)}
+.pass .tag{color:var(--text);background:var(--bg2);border-radius:6px;padding:1px 7px;font-size:12px;font-weight:600}
+.pass .perf{position:relative;height:0;border-top:2px dashed var(--sep);margin:0 14px}
+.pass .perf:before,.pass .perf:after{content:"";position:absolute;top:-10px;width:18px;height:18px;border-radius:50%;background:var(--bg2)}
+.pass .perf:before{left:-24px}.pass .perf:after{right:-24px}
+.pass .actions{display:flex;gap:8px;padding:12px 14px 14px}
+.pass.expired .body{opacity:.62}
+.pass.expired .bar i{background:var(--hint)}
+.pass .ribbon{position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--gold),var(--gold-hi),var(--gold))}
+.pass.expired .ribbon{background:var(--sep)}
+
+/* кнопки */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:var(--r-md);font-weight:700;font-size:15px;flex:1}
+.btn.primary{background:var(--btn);color:var(--btn-text)}
+.btn.gold{background:linear-gradient(135deg,var(--gold-hi),var(--gold));color:var(--gold-ink)}
+.btn.soft{background:var(--bg)}
+.panel .btn.soft{background:var(--bg2)}
+.btn.line{box-shadow:inset 0 0 0 1.5px var(--gold);color:var(--gold)}
+.btn.danger{color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--bg))}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.btn.block{width:100%;flex:none}
+.btn:active{transform:scale(.985)}
+.linkbtn{color:var(--link);font-weight:600}
+
+/* пустое состояние */
+.empty{background:var(--bg);border-radius:var(--r-lg);padding:26px 20px;text-align:center}
+.empty .big{font-size:34px;margin-bottom:6px}
+.empty p{margin:4px 0 16px;color:var(--hint)}
+
+/* баннер */
+.note{border-radius:var(--r-md);padding:12px 14px;font-size:14px;margin:12px 0}
+.note.bad{background:color-mix(in srgb,var(--bad) 12%,var(--bg));color:var(--text)}
+.note.gold{background:var(--gold-soft)}
+.note.ok{background:color-mix(in srgb,var(--ok) 12%,var(--bg))}
+
+/* шаги мастера (это действительно последовательность) */
+.steps{display:flex;gap:6px;margin:8px 0 14px}
+.steps span{flex:1;height:4px;border-radius:4px;background:var(--sep)}
+.steps span.on{background:var(--gold)}
+.steptitle{margin-bottom:12px}
+.steptitle h1{margin-bottom:0}
+.steptitle .muted{font-size:14px}
+
+/* сети */
+.pills{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;scrollbar-width:none}
+.pills::-webkit-scrollbar{display:none}
+.pill{flex:none;padding:9px 14px;border-radius:999px;background:var(--bg);font-weight:600;font-size:14px;white-space:nowrap}
+.pill.on{background:var(--text);color:var(--bg)}
+
+.search{width:100%;border:0;border-radius:var(--r-md);background:var(--bg);padding:12px 14px;margin-bottom:10px;outline:none}
+.paidmark{color:var(--ok);font-size:13px;font-weight:600}
+
+/* тарифы */
+.tariffs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tariff{background:var(--bg);border-radius:var(--r-lg);padding:14px;text-align:left;position:relative;box-shadow:inset 0 0 0 1.5px transparent}
+.tariff.on{box-shadow:inset 0 0 0 2px var(--gold)}
+.tariff .d{font-weight:700}
+.tariff .p{font-family:var(--display);font-weight:700;font-size:20px;margin-top:6px}
+.tariff .p small{font-family:var(--ui);font-size:13px;font-weight:600;color:var(--hint)}
+.tariff .old{text-decoration:line-through;color:var(--hint);font-size:12px}
+.tariff .per{font-size:12px;color:var(--hint);margin-top:2px}
+
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.toggle{width:46px;height:28px;border-radius:999px;background:var(--sep);position:relative;flex:none;transition:background .15s}
+.toggle:after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+.toggle.on{background:var(--gold)}
+.toggle.on:after{transform:translateX(18px)}
+
+.promo{display:flex;gap:8px;padding:12px 16px}
+.promo input{flex:1;border:0;border-radius:var(--r-sm);background:var(--bg2);padding:10px 12px;outline:none;text-transform:uppercase;min-width:0}
+.promo .btn{flex:none}
+
+.sum .line{display:flex;justify-content:space-between;padding:6px 16px;font-size:14px}
+.sum .line.disc span:last-child{color:var(--ok);font-weight:600}
+.sum .total{display:flex;justify-content:space-between;align-items:baseline;padding:12px 16px 14px;border-top:1px solid var(--sep);margin-top:6px}
+.sum .total .num{font-size:26px}
+
+.paygrid{display:grid;gap:8px;margin-top:12px}
+.paybtn{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:var(--r-md);padding:12px 14px;text-align:left;min-height:54px}
+.paybtn .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--bg2);font-size:17px;flex:none}
+.paybtn .grow{flex:1}
+.paybtn .grow b{display:block;font-weight:700}
+.paybtn .grow span{font-size:13px;color:var(--hint)}
+.paybtn.main{background:linear-gradient(135deg,var(--gold-hi),var(--gold));color:var(--gold-ink)}
+.paybtn.main .ic{background:rgba(255,255,255,.35)}
+.paybtn.main .grow span{color:rgba(43,29,4,.7)}
+.paybtn[disabled]{opacity:.45;pointer-events:none}
+
+/* редактор */
+textarea.ed{width:100%;min-height:150px;border:0;border-radius:var(--r-lg);background:var(--bg);padding:14px 16px;resize:none;outline:none;line-height:1.5}
+.edfoot{display:flex;justify-content:space-between;font-size:13px;padding:6px 4px 0;min-height:22px}
+.edfoot .bad{color:var(--bad);font-weight:600}
+.edfoot .ok{color:var(--ok);font-weight:600}
+.media{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.tile{aspect-ratio:1;border-radius:var(--r-md);background:var(--bg);position:relative;overflow:hidden;display:grid;place-items:center;color:var(--hint);font-size:13px;text-align:center}
+.tile img,.tile video{width:100%;height:100%;object-fit:cover;display:block}
+.tile .x{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:14px;line-height:24px}
+.tile .prog{position:absolute;left:0;bottom:0;height:4px;background:var(--gold)}
+.tile.add{border:1.5px dashed var(--sep);background:transparent;font-size:26px}
+.tile .vid{font-size:24px}
+
+/* предпросмотр в стиле сообщения Telegram */
+.chatbg{border-radius:var(--r-lg);padding:14px 12px;background:
+  radial-gradient(circle at 20% 10%, color-mix(in srgb,var(--gold) 10%, transparent), transparent 40%),
+  color-mix(in srgb,var(--hint) 14%, var(--bg2))}
+.bubble{background:var(--bg);border-radius:16px 16px 16px 6px;max-width:92%;overflow:hidden;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.bubble .pics{display:grid;gap:2px}
+.bubble .pics img,.bubble .pics .vph{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--bg2)}
+.bubble .pics .vph{display:grid;place-items:center;font-size:28px;color:var(--hint)}
+.bubble .txt{padding:10px 12px 8px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}
+.bubble .fire{font-size:18px;letter-spacing:2px;margin-bottom:6px}
+.bubble .from{font-weight:700}
+.bubble .from a{color:var(--link);text-decoration:none}
+.bubble .sig{font-size:13px;margin-top:10px}
+.bubble .sig i{color:var(--hint)}
+.bubble .dm{margin:0 8px 8px;border-radius:10px;background:color-mix(in srgb,var(--ok) 85%,#000 0%);color:#fff;text-align:center;padding:9px;font-weight:700;font-size:14px}
+
+.seg{display:flex;background:var(--bg);border-radius:var(--r-md);padding:3px;margin:6px 0 12px}
+.seg button{flex:1;padding:8px;border-radius:9px;font-weight:600;font-size:14px;color:var(--hint)}
+.seg button.on{background:var(--bg2);color:var(--text)}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips button{padding:8px 14px;border-radius:999px;background:var(--bg2);font-weight:600}
+.chips button.on{background:var(--gold);color:var(--gold-ink)}
+
+.check{display:flex;align-items:center;gap:10px;padding:12px 16px}
+.check input{width:20px;height:20px;accent-color:var(--gold)}
+
+.result .row .title{font-weight:600}
+.badge-ok{color:var(--ok);font-weight:700}
+.badge-bad{color:var(--bad);font-weight:700}
+
+/* таб-бар */
+.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--sep);display:flex;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:5}
+.tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;font-size:11px;font-weight:600;color:var(--hint);border-radius:10px}
+.tabs button svg{width:24px;height:24px}
+.tabs button.on{color:var(--text)}
+.tabs button.on svg{color:var(--gold)}
+
+/* шторка */
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10;display:flex;align-items:flex-end;animation:fade .15s}
+.sheet{background:var(--bg2);width:100%;max-height:82vh;overflow:auto;border-radius:20px 20px 0 0;padding:8px 16px calc(20px + env(safe-area-inset-bottom));animation:up .2s ease-out}
+.sheet .grab{width:38px;height:5px;border-radius:5px;background:var(--sep);margin:4px auto 10px}
+@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+@keyframes fade{from{opacity:0}}
+.toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;font-size:14px;z-index:20;max-width:90%;text-align:center}
+.spin{width:22px;height:22px;border:3px solid var(--sep);border-top-color:var(--gold);border-radius:50%;animation:rot .8s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes rot{to{transform:rotate(360deg)}}
+.center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:60px 20px;text-align:center}
+.howto p{margin:6px 0}
+.howto .f{background:var(--bg);border-radius:var(--r-md);padding:12px 14px;margin:8px 0}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"><div class="center"><span class="spin"></span><span class="muted">Открываем кабинет…</span></div></div>
+<nav class="tabs" id="tabs" hidden>
+  <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 11h18M8 6V4M16 6V4"/></svg>Кабинет</button>
+  <button data-tab="new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Разместить</button>
+  <button data-tab="posts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Посты</button>
+  <button data-tab="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>Ещё</button>
+</nav>
+
+<script>
+"use strict";
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+const INIT = tg ? tg.initData : "";
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.setHeaderColor("secondary_bg_color"); tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
+  if (tg.colorScheme === "dark") document.documentElement.classList.add("dark");
+  tg.onEvent && tg.onEvent("themeChanged", () => document.documentElement.classList.toggle("dark", tg.colorScheme === "dark"));
+}
+
+/* ---------- утилиты ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => Number(n || 0).toLocaleString("ru-RU");
+const plural = (n, a, b, c) => { n = Math.abs(n) % 100; const d = n % 10; if (n > 10 && n < 20) return c; if (d > 1 && d < 5) return b; if (d === 1) return a; return c; };
+const haptic = t => { try { tg && tg.HapticFeedback && (t === "ok" ? tg.HapticFeedback.notificationOccurred("success") : t === "err" ? tg.HapticFeedback.notificationOccurred("error") : tg.HapticFeedback.selectionChanged()); } catch (e) {} };
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("mpcab:" + (S.user ? S.user.id : 0) + ":" + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("mpcab:" + (S.user ? S.user.id : 0) + ":" + k, JSON.stringify(v)); } catch (e) {} }
+};
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+async function api(path, data) {
+  const r = await fetch("/cabinet/api/" + path, { method: "POST", headers: { "Content-Type": "application/json", "X-Init-Data": INIT }, body: JSON.stringify(data || {}) });
+  let j = {};
+  try { j = await r.json(); } catch (e) { j = { ok: false, error: "Сервер недоступен. Попробуйте ещё раз." }; }
+  if (!r.ok && j.ok !== false) j = { ok: false, error: "Ошибка " + r.status };
+  return j;
+}
+function confirmBox(text) {
+  return new Promise(res => { if (tg && tg.showConfirm) tg.showConfirm(text, ok => res(!!ok)); else res(window.confirm(text)); });
+}
+function openTg(url) { if (tg && /^https:\/\/t\.me\//.test(url) && tg.openTelegramLink) tg.openTelegramLink(url); else if (tg && tg.openLink) tg.openLink(url); else window.open(url, "_blank"); }
+function leftText(sec) {
+  if (sec <= 0) return { n: "0", u: "закончился" };
+  const d = Math.floor(sec / 86400); if (d >= 1) return { n: String(d), u: plural(d, "день", "дня", "дней") };
+  const h = Math.floor(sec / 3600); if (h >= 1) return { n: String(h), u: plural(h, "час", "часа", "часов") };
+  const m = Math.max(1, Math.floor(sec / 60)); return { n: String(m), u: "мин" };
+}
+const netName = k => (S.networks.find(n => n.key === k) || {}).name || (k === "all" ? "Все сети" : k);
+
+/* ---------- состояние ---------- */
+const S = {
+  tab: "home", user: null, banned: false, approved: false, balances: { rub: 0, points: 0 }, networks: [], cities: [], subs: [], config: {}, signatures: {},
+  w: { step: 1, net: "mk", city: null, q: "", quote: null, days: 7, pin: false, promo: "", promoState: null, text: "", media: [], mode: "once", interval: 6, saveTpl: false, check: null, result: null, waiting: false },
+  postsSeg: "posts", posts: null, autos: null, templates: null
+};
+
+/* ---------- запуск ---------- */
+async function boot() {
+  if (!INIT) { $("#app").innerHTML = `<div class="center"><div style="font-size:40px">📱</div><b>Откройте кабинет из Telegram</b><span class="muted">Кнопка «📱 Кабинет» в меню бота.</span></div>`; return; }
+  const j = await api("bootstrap");
+  if (!j.ok) { $("#app").innerHTML = `<div class="center"><b>${esc(j.error || "Не удалось открыть кабинет")}</b><button class="btn primary" onclick="boot()">Повторить</button></div>`; return; }
+  Object.assign(S, { user: j.user, banned: j.banned, approved: j.channel_approved, balances: j.balances, networks: j.networks, cities: j.cities, subs: j.subs, config: j.config, signatures: j.signatures, support: j.support_url, cheap: j.cheap_stars_url });
+  const draft = store.get("draft", null);
+  if (draft) { S.w.text = draft.text || ""; S.w.media = (draft.media || []).filter(m => m.id); }
+  $("#tabs").hidden = false;
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => go(b.dataset.tab));
+  go("home");
+}
+function saveDraft() { store.set("draft", { text: S.w.text, media: S.w.media.filter(m => m.id).map(m => ({ type: m.type, id: m.id, thumb: m.thumb })) }); }
+
+function go(tab) {
+  S.tab = tab; haptic();
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  window.scrollTo(0, 0);
+  render();
+}
+function render() {
+  setBack();
+  const v = { home: viewHome, new: viewNew, posts: viewPosts, more: viewMore }[S.tab];
+  v();
+}
+function setBack() {
+  if (!tg || !tg.BackButton) return;
+  tg.BackButton.offClick(onBack);
+  const show = (S.tab === "new" && S.w.step > 1) || S.sub;
+  if (show) { tg.BackButton.show(); tg.BackButton.onClick(onBack); } else tg.BackButton.hide();
+}
+function onBack() {
+  if (S.sub) { S.sub = null; render(); return; }
+  if (S.tab === "new" && S.w.step > 1) { S.w.result = null; S.w.step = (S.w.step === 3 && S.w.skippedPay) ? 1 : S.w.step - 1; render(); }
+}
+
+/* ================= КАБИНЕТ ================= */
+function viewHome() {
+  const name = S.user.first_name || "рекламодатель";
+  const active = S.subs.filter(s => s.active), ended = S.subs.filter(s => !s.active);
+  let h = `<div class="wrap">
+    <div class="top"><div><div class="muted small">Рекламный кабинет</div><h1>${esc(name)}</h1></div></div>
+    <div class="wallet">
+      <span class="chip">Кэшбэк <b>${fmt(S.balances.rub)} ₽</b></span>
+      <span class="chip">Очки <b>${fmt(S.balances.points)}</b></span>
+      ${S.approved ? `<span class="chip">✅ Реклама канала одобрена</span>` : ""}
+    </div>`;
+  if (S.banned) h += `<div class="note bad">Вы заблокированы в сети, поэтому покупка и публикация рекламы недоступны. Снять ограничения можно через <a href="#" onclick="openTg('${esc(S.support)}');return false">поддержку</a>.</div>`;
+  h += `<h2>Ваши доступы</h2>`;
+  if (!S.subs.length) {
+    h += `<div class="empty"><div class="big">🎟</div><b>Доступа к публикации пока нет</b><p>Выберите город и сеть — цена посчитается сразу, оплатить можно звёздами, криптой, кэшбэком или очками.</p><button class="btn gold block" onclick="startNew()">Выбрать город</button></div>`;
+  } else {
+    active.forEach(s => h += passCard(s));
+    ended.forEach(s => h += passCard(s));
+    h += `<button class="btn soft block" style="margin-top:4px" onclick="startNew()">Купить доступ в другой город</button>`;
+  }
+  h += `</div>`;
+  $("#app").innerHTML = h;
+}
+function passCard(s) {
+  const L = leftText(s.seconds_left);
+  const pct = s.progress == null ? (s.active ? 100 : 0) : Math.round(s.progress * 100);
+  const renewLbl = s.renew_pct ? `Продлить −${s.renew_pct}%` : "Продлить";
+  const tags = [s.pin ? `<span class="tag">📌 закреп</span>` : "", s.links ? `<span class="tag">🔗 ссылки разрешены</span>` : ""].join("");
+  return `<div class="pass ${s.active ? "" : "expired"}">
+    <div class="ribbon"></div>
+    <div class="body">
+      <div class="head">
+        <div><div class="net">${esc(s.network)}</div><div class="city">${esc(s.city)}</div></div>
+        ${s.active ? `<div class="left"><div class="num">${esc(L.n)}</div><div class="unit">${esc(L.u)}</div></div>` : ""}
+      </div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="meta">
+        <span>${s.active ? "до " + esc(s.until) : "закончился " + esc(s.until)}</span>
+        ${s.active ? `<span>сегодня ${s.today} из ${s.limit}</span>` : ""}
+        ${tags}
+      </div>
+      ${!s.active && s.renew_until ? `<div class="note gold" style="margin:10px 0 0">Скидка −${s.renew_pct}% на продление действует до ${esc(s.renew_until)}</div>` : ""}
+    </div>
+    <div class="perf"></div>
+    <div class="actions">
+      ${s.active ? `<button class="btn primary" onclick="publishFor('${esc(s.net)}','${esc(s.city_token)}')">Опубликовать</button>` : ""}
+      <button class="btn ${s.active ? "line" : "gold"}" onclick="renewFor('${esc(s.net)}','${esc(s.city_token)}')">${renewLbl}</button>
+    </div>
+  </div>`;
+}
+function cityByToken(t) { return S.cities.find(c => c.token === t); }
+function startNew() { Object.assign(S.w, { step: 1, city: null, quote: null, result: null, promo: "", promoState: null }); go("new"); }
+function publishFor(net, tok) { const c = cityByToken(tok); if (!c) return toast("Город больше недоступен"); Object.assign(S.w, { net, city: c.name, step: 3, skippedPay: true, result: null }); go("new"); }
+async function renewFor(net, tok) { const c = cityByToken(tok); if (!c) return toast("Город больше недоступен"); Object.assign(S.w, { net, city: c.name, step: 2, result: null, promo: "", promoState: null, quote: null, renewing: true }); go("new"); }
+
+/* ================= РАЗМЕСТИТЬ (мастер) ================= */
+function viewNew() {
+  const w = S.w;
+  const titles = { 1: "Где разместить", 2: "Доступ", 3: "Объявление", 4: "Публикация" };
+  let h = `<div class="wrap"><div class="steps">${[1,2,3,4].map(i => `<span class="${i <= w.step ? "on" : ""}"></span>`).join("")}</div>
+    <div class="steptitle"><h1>${titles[w.step]}</h1>${w.city && w.step > 1 ? `<div class="muted">${esc(netName(w.net))}, ${esc(w.city)}</div>` : ""}</div>`;
+  if (S.banned) { $("#app").innerHTML = h + `<div class="note bad">Размещение недоступно: аккаунт заблокирован в сети.</div></div>`; return; }
+  h += `<div id="wbody"></div></div>`;
+  $("#app").innerHTML = h;
+  ({ 1: stepWhere, 2: stepAccess, 3: stepCompose, 4: stepPublish })[w.step]();
+}
+
+function stepWhere() {
+  const w = S.w;
+  const nets = [...S.networks, { key: "all", name: "Все сети" }];
+  const list = S.cities.filter(c => w.net === "all" ? c.nets.length >= 2 : c.nets.includes(w.net))
+    .filter(c => !w.q || c.name.toLowerCase().includes(w.q.toLowerCase()));
+  const paid = city => S.subs.find(s => s.active && s.city === city && (s.network === "Все сети" || s.net === w.net || (w.net === "all")));
+  let h = `<div class="pills">${nets.map(n => `<button class="pill ${n.key === w.net ? "on" : ""}" onclick="pickNet('${n.key}')">${esc(n.name)}</button>`).join("")}</div>
+    <input class="search" id="q" placeholder="Найти город" value="${esc(w.q)}" autocomplete="off">`;
+  if (w.net === "all") h += `<div class="note gold small" style="margin-top:0">«Все сети» — объявление выходит во всех сетях города. Скидка за пакет: 3 сети −10%, 4 — −20%, 5 — −30%.</div>`;
+  h += `<div class="panel">` + (list.length ? list.map(c => {
+    const p = paid(c.name);
+    return `<button class="row" onclick="pickCity('${esc(c.token)}')"><div class="grow"><div class="title">${esc(c.name)}</div><div class="sub">${c.chats} ${plural(c.chats, "чат", "чата", "чатов")}${w.net === "all" ? ", сетей: " + c.nets.length : ""}</div></div>${p ? `<span class="paidmark">оплачено</span>` : ""}<span class="chev">›</span></button>`;
+  }).join("") : `<div class="row muted">Ничего не нашлось</div>`) + `</div>`;
+  $("#wbody").innerHTML = h;
+  const q = $("#q"); q.oninput = () => { w.q = q.value; const pos = q.selectionStart; stepWhere(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); };
+}
+function pickNet(k) { S.w.net = k; haptic(); stepWhere(); }
+async function pickCity(tok) {
+  const c = cityByToken(tok); if (!c) return;
+  Object.assign(S.w, { city: c.name, quote: null, promo: "", promoState: null, renewing: false });
+  haptic();
+  const q = await api("quote", { net: S.w.net, city: tok });
+  if (!q.ok) return toast(q.error);
+  S.w.quote = q;
+  if (q.access_until) { S.w.step = 3; S.w.skippedPay = true; } else { S.w.step = 2; S.w.skippedPay = false; }
+  render();
+}
+
+async function loadQuote() {
+  const w = S.w;
+  const c = S.cities.find(x => x.name === w.city);
+  const q = await api("quote", { net: w.net, city: c ? c.token : w.city, promo: w.promo });
+  if (!q.ok) { toast(q.error); return null; }
+  w.quote = q; w.promoState = q.promo;
+  if (!q.tariffs.find(t => t.days === w.days)) w.days = q.tariffs[0].days;
+  return q;
+}
+async function stepAccess() {
+  const w = S.w;
+  if (!w.quote || w.quote.city !== w.city || w.quote.net !== w.net) { $("#wbody").innerHTML = `<div class="center"><span class="spin"></span></div>`; if (!await loadQuote()) return; }
+  if (w.waiting) return renderWaiting();
+  const q = w.quote, b = q.breakdown;
+  const t = q.tariffs.find(x => x.days === w.days) || q.tariffs[0];
+  const amount = w.pin ? t.amount_pin : t.amount;
+  const rub = Math.floor(amount * q.rates.rub), pts = Math.floor(amount * q.rates.points);
+  let h = "";
+  if (q.access_until) h += `<div class="note ok">Доступ оплачен до ${esc(q.access_until)}. Продление добавится к этому сроку — оставшиеся дни не сгорят.</div>`;
+  else if (q.renew_until) h += `<div class="note gold">Скидка −${b.renew_discount}% на продление действует до ${esc(q.renew_until)}.</div>`;
+  h += `<div class="tariffs">${q.tariffs.map(x => {
+    const a = w.pin ? x.amount_pin : x.amount;
+    return `<button class="tariff ${x.days === w.days ? "on" : ""}" onclick="pickDays(${x.days})">
+      <div class="d">${x.days} ${plural(x.days, "день", "дня", "дней")}</div>
+      <div class="p">${fmt(a)} <small>⭐️</small></div>
+      <div class="per">${x.days > 1 ? "≈ " + fmt(Math.round(a / x.days)) + " ⭐️ в день" : "пробный"}</div>
+    </button>`; }).join("")}</div>
+    <div class="panel" style="margin-top:12px">
+      <div class="row switch" onclick="togglePin()" role="switch" aria-checked="${w.pin}"><div class="grow"><div class="title">📌 Закреплять посты</div><div class="sub">Объявление висит сверху чата, +${Math.round((b.pin_markup - 1) * 100)}% к цене</div></div><span class="toggle ${w.pin ? "on" : ""}"></span></div>
+      <div class="promo"><input id="promo" placeholder="Промокод" value="${esc(w.promo)}" autocomplete="off"><button class="btn soft" onclick="applyPromo()">Применить</button></div>
+      ${w.promoState === "bad" ? `<div class="row small" style="color:var(--bad);padding-top:0">Промокод не найден, исчерпан, уже использован вами или не подходит для рекламы.</div>` : ""}
+    </div>
+    <div class="panel sum" style="margin-top:12px">${sumLines(q, t)}
+      <div class="total"><span class="muted">Итого за ${w.days} ${plural(w.days, "день", "дня", "дней")}</span><span class="num">${fmt(amount)} ⭐️</span></div>
+    </div>
+    <h2>Способ оплаты</h2>
+    <div class="paygrid">
+      <button class="paybtn main" onclick="pay('stars')"><span class="ic">⭐️</span><span class="grow"><b>Звёздами Telegram</b><span>${fmt(amount)} ⭐️, доступ сразу</span></span></button>
+      <button class="paybtn" onclick="pay('rub')" ${q.balances.rub >= rub ? "" : "disabled"}><span class="ic">💳</span><span class="grow"><b>С кэшбэка</b><span>${fmt(rub)} ₽, на балансе ${fmt(q.balances.rub)} ₽</span></span></button>
+      <button class="paybtn" onclick="pay('points')" ${q.balances.points >= pts ? "" : "disabled"}><span class="ic">🎰</span><span class="grow"><b>Очками</b><span>${fmt(pts)} очков, у вас ${fmt(q.balances.points)}</span></span></button>
+      <button class="paybtn" onclick="pay('usdt')"><span class="ic">🟢</span><span class="grow"><b>USDT через CryptoBot</b><span>${fmt(rub)} ₽ по курсу</span></span></button>
+      <button class="paybtn" onclick="pay('ton')"><span class="ic">💎</span><span class="grow"><b>TON через CryptoBot</b><span>${fmt(rub)} ₽ по курсу</span></span></button>
+      <button class="paybtn" onclick="pay('card')"><span class="ic">🏦</span><span class="grow"><b>Картой или СБП</b><span>${fmt(rub)} ₽ через поддержку</span></span></button>
+    </div>
+    ${S.cheap ? `<p class="small muted" style="margin:14px 4px">Звёзды можно купить дешевле официального курса — <a href="#" onclick="openTg('${esc(S.cheap)}');return false">через проверенный сервис</a>.</p>` : ""}`;
+  $("#wbody").innerHTML = h;
+}
+function sumLines(q, t) {
+  const b = q.breakdown, w = S.w, lines = [];
+  lines.push(`<div class="line"><span>Базовая цена, ${w.days} ${plural(w.days, "день", "дня", "дней")}</span><span>${fmt(t.base)} ⭐️</span></div>`);
+  if (b.vip_markup > 1) lines.push(`<div class="line"><span>Реклама канала</span><span>×${b.vip_markup}</span></div>`);
+  if (w.net === "all") lines.push(`<div class="line"><span>Сетей к оплате</span><span>×${b.buying_now}</span></div>`);
+  if (b.discount_net) lines.push(`<div class="line disc"><span>Пакет сетей</span><span>−${b.discount_net}%</span></div>`);
+  if (b.renew_discount) lines.push(`<div class="line disc"><span>Продление</span><span>−${b.renew_discount}%</span></div>`);
+  if (w.pin) lines.push(`<div class="line"><span>Закреп</span><span>+${Math.round((b.pin_markup - 1) * 100)}%</span></div>`);
+  if (q.promo === "ok") lines.push(`<div class="line disc"><span>Промокод ${esc(q.promo_code)}</span><span>−${b.promo_type === "fixed" ? fmt(b.promo_value) + " ⭐️" : b.promo_value + "%"}</span></div>`);
+  return `<div style="height:6px"></div>` + lines.join("");
+}
+function pickDays(d) { S.w.days = d; haptic(); stepAccess(); }
+function togglePin() { S.w.pin = !S.w.pin; haptic(); stepAccess(); }
+async function applyPromo() {
+  S.w.promo = ($("#promo").value || "").trim().toUpperCase();
+  await loadQuote();
+  haptic(S.w.promoState === "ok" ? "ok" : S.w.promoState === "bad" ? "err" : "");
+  stepAccess();
+}
+async function pay(method) {
+  const w = S.w, c = S.cities.find(x => x.name === w.city);
+  const cur = S.subs.filter(s => s.active && s.city === w.city && (w.net === "all" ? s.network === "Все сети" : s.net === w.net)).sort((a, b) => b.seconds_left - a.seconds_left)[0];
+  w.renewing = !!(w.quote && w.quote.access_until); w.prevLeft = cur ? cur.seconds_left : 0;
+  const j = await api("checkout", { net: w.net, city: c.token, days: w.days, pin: w.pin, promo: w.promoState === "ok" ? w.promo : "", method });
+  if (!j.ok) { haptic("err"); return toast(j.error); }
+  if (j.kind === "invoice") {
+    if (tg && tg.openInvoice) tg.openInvoice(j.link, status => { if (status === "paid") { haptic("ok"); waitForAccess(); } else if (status === "failed") toast("Оплата не прошла"); });
+    else openTg(j.link);
+  } else if (j.kind === "link") {
+    openTg(j.link); waitForAccess(true);
+  } else if (j.kind === "paid") {
+    haptic("ok"); S.subs = j.subs; S.balances = j.balances; toast(j.message);
+    w.step = 3; w.skippedPay = false; render();
+  } else if (j.kind === "card") {
+    sheet(`<h2 style="margin-top:4px">Оплата картой или СБП</h2><div class="panel" style="padding:14px 16px">${esc(j.text)}</div>
+      <div style="height:12px"></div><button class="btn primary block" onclick="openTg('${esc(j.support_url)}')">Написать в поддержку</button>`);
+  }
+}
+let waitTimer = null;
+function waitForAccess(external) {
+  S.w.waiting = { since: Date.now(), external: !!external };
+  renderWaiting();
+  clearInterval(waitTimer);
+  waitTimer = setInterval(async () => {
+    if (S.tab !== "new" || !S.w.waiting) { clearInterval(waitTimer); return; }
+    const c = S.cities.find(x => x.name === S.w.city);
+    const q = await api("quote", { net: S.w.net, city: c.token });
+    const r = await api("subs");
+    if (r.ok) { S.subs = r.subs; S.balances = r.balances; }
+    const fresh = r.ok && r.subs.find(s => s.city === S.w.city && s.active && (S.w.net === "all" ? true : (s.net === S.w.net || s.network === "Все сети")) && s.seconds_left > (S.w.prevLeft || 0) + 3600);
+    if ((q.ok && q.access_until && !S.w.renewing) || fresh) {
+      clearInterval(waitTimer); S.w.waiting = false; haptic("ok"); toast("Оплата получена");
+      S.w.step = 3; S.w.skippedPay = false; render();
+    } else if (Date.now() - S.w.waiting.since > 15 * 60 * 1000) { clearInterval(waitTimer); S.w.waiting = false; render(); }
+  }, 3500);
+}
+function renderWaiting() {
+  $("#wbody").innerHTML = `<div class="center"><span class="spin"></span><b>Ждём подтверждения оплаты</b>
+    <span class="muted">${S.w.waiting && S.w.waiting.external ? "Оплатите счёт в CryptoBot и вернитесь сюда — доступ появится автоматически." : "Обычно это занимает несколько секунд."}</span>
+    <button class="btn soft" onclick="S.w.waiting=false;stepAccess()">Вернуться к тарифам</button></div>`;
+}
+
+/* --- объявление --- */
+function stepCompose() {
+  const w = S.w;
+  const cnt = w.text.length;
+  let h = `<textarea class="ed" id="ed" placeholder="Расскажите, что предлагаете: кто вы, где, когда удобно. Ссылки и @username запрещены.">${esc(w.text)}</textarea>
+    <div class="edfoot"><span id="chk">${checkLabel()}</span><span class="muted">${cnt} / 3500</span></div>
+    <div class="small muted" style="margin:12px 4px 0">Фото или видео, до 10 штук</div>
+    <div class="media" id="media" style="margin-top:8px">${w.media.map((m, i) => tile(m, i)).join("")}${w.media.length < 10 ? `<label class="tile add" aria-label="Добавить фото или видео">＋<input type="file" accept="image/*,video/*" multiple hidden id="file"></label>` : ""}</div>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn soft" onclick="pickTemplate()">Взять из шаблона</button>${w.text || w.media.length ? `<button class="btn soft" onclick="clearDraft()">Очистить</button>` : ""}</div>
+    <h2>Так увидят в группе</h2>
+    <div class="chatbg">${previewBubble()}</div>
+    <div style="height:14px"></div>
+    <button class="btn primary block" id="next3" onclick="toPublish()">Дальше</button>`;
+  $("#wbody").innerHTML = h;
+  const ed = $("#ed"); autosize(ed);
+  ed.oninput = () => { w.text = ed.value; autosize(ed); saveDraft(); $(".edfoot .muted").textContent = w.text.length + " / 3500"; refreshPreview(); scheduleCheck(); };
+  const f = $("#file"); if (f) f.onchange = () => uploadFiles(Array.from(f.files));
+  if (w.text && !w.check) scheduleCheck(0);
+}
+function autosize(el) { el.style.height = "auto"; el.style.height = Math.max(150, el.scrollHeight) + "px"; }
+function checkLabel() { const c = S.w.check; if (!c) return ""; if (c === "busy") return `<span class="muted">Проверяем текст…</span>`; return c.valid ? `<span class="ok">Текст проходит проверку</span>` : `<span class="bad">${esc(c.reason)}</span>`; }
+let chkT = null;
+function scheduleCheck(delay = 600) {
+  clearTimeout(chkT);
+  chkT = setTimeout(async () => {
+    if (!S.w.text.trim()) { S.w.check = null; const e = $("#chk"); if (e) e.innerHTML = ""; return; }
+    const c = S.cities.find(x => x.name === S.w.city);
+    const j = await api("check_text", { text: S.w.text, net: S.w.net, city: c ? c.token : "" });
+    if (j.ok) { S.w.check = j; const e = $("#chk"); if (e) e.innerHTML = checkLabel(); }
+  }, delay);
+}
+function tile(m, i) {
+  const inner = m.local ? (m.type === "video" ? `<video src="${m.local}" muted playsinline></video>` : `<img src="${m.local}" alt="">`)
+    : m.thumb ? `<img src="${esc(m.thumb)}" alt="">` : `<span class="vid">${m.type === "video" ? "🎬" : "🖼"}</span>`;
+  return `<div class="tile">${inner}${m.uploading ? `<span class="prog" style="width:${m.progress || 5}%"></span>` : `<button class="x" onclick="rmMedia(${i})" aria-label="Убрать">✕</button>`}</div>`;
+}
+function rmMedia(i) { S.w.media.splice(i, 1); saveDraft(); stepCompose(); }
+function clearDraft() { S.w.text = ""; S.w.media = []; S.w.check = null; saveDraft(); stepCompose(); }
+function uploadFiles(files) {
+  const w = S.w;
+  files.slice(0, 10 - w.media.length).forEach(file => {
+    const m = { type: file.type.startsWith("video") ? "video" : "photo", local: URL.createObjectURL(file), uploading: true, progress: 5 };
+    w.media.push(m);
+    const fd = new FormData(); fd.append("file", file);
+    const x = new XMLHttpRequest();
+    x.open("POST", "/cabinet/api/media"); x.setRequestHeader("X-Init-Data", INIT);
+    x.upload.onprogress = e => { if (e.lengthComputable) { m.progress = Math.round(e.loaded / e.total * 95); const el = document.querySelectorAll("#media .tile")[w.media.indexOf(m)]; const p = el && el.querySelector(".prog"); if (p) p.style.width = m.progress + "%"; } };
+    x.onload = () => {
+      let j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
+      if (j.ok) { Object.assign(m, j.media, { uploading: false }); saveDraft(); }
+      else { w.media.splice(w.media.indexOf(m), 1); toast(j.error || (x.status === 413 ? "Файл слишком большой" : "Не удалось загрузить файл")); }
+      if (S.tab === "new" && w.step === 3) stepCompose();
+    };
+    x.onerror = () => { w.media.splice(w.media.indexOf(m), 1); toast("Нет связи — файл не загружен"); stepCompose(); };
+    x.send(fd);
+  });
+  stepCompose();
+}
+function previewBubble() {
+  const w = S.w, u = S.user;
+  const net = w.net === "all" ? "mk" : w.net;
+  const sigRaw = S.signatures[netName(net)] || "";
+  const sig = esc(sigRaw.replace(/<\/?b>/g, "").replace(/<\/?i>/g, "")).replace(/\n/g, "<br>");
+  const pics = w.media.slice(0, 4).map(m => m.type === "photo" ? `<img src="${esc(m.local || m.thumb || "")}" alt="">` : `<div class="vph">🎬</div>`).join("");
+  const name = esc([u.first_name, u.last_name].filter(Boolean).join(" ") || "Вы");
+  return `<div class="bubble">${pics ? `<div class="pics" style="grid-template-columns:${w.media.length > 1 ? "1fr 1fr" : "1fr"}">${pics}</div>` : ""}
+    <div class="txt" id="pvtxt"><div class="fire">🔥🔥🔥🔥🔥🔥🔥</div>📢 Объявление от <span class="from"><a>${name}</a></span>:<br><br>${w.text ? esc(w.text) : `<span class="muted">Здесь будет ваш текст</span>`}<div class="sig"><i>${sig}</i></div></div>
+    <div class="dm">Напиши мне в ЛС</div></div>`;
+}
+function refreshPreview() { const c = $(".chatbg"); if (c) c.innerHTML = previewBubble(); }
+function toPublish() {
+  const w = S.w;
+  if (!w.text.trim()) { haptic("err"); return toast("Напишите текст объявления"); }
+  if (w.media.some(m => m.uploading)) return toast("Дождитесь загрузки файлов");
+  if (w.check && w.check.valid === false) { haptic("err"); return toast(w.check.reason); }
+  w.step = 4; w.result = null; render();
+}
+async function pickTemplate() {
+  const j = await api("templates");
+  if (!j.ok) return toast(j.error);
+  if (!j.templates.length) return toast("Шаблонов пока нет — сохраните объявление при публикации");
+  S._tpls = j.templates;
+  sheet(`<h2 style="margin-top:4px">Шаблоны</h2><div class="panel">${j.templates.map((t, i) => `<button class="row" onclick="useTpl(${i})"><div class="grow"><div class="title">${esc(t.name)}</div><div class="sub">${esc(t.text.slice(0, 90))}${t.media.length ? ", 📎 " + t.media.length : ""}</div></div><span class="chev">›</span></button>`).join("")}</div>`);
+}
+function useTpl(i) { const t = S._tpls[i]; S.w.text = t.text; S.w.media = t.media.map(m => ({ ...m })); S.w.check = null; saveDraft(); closeSheet(); if (S.tab !== "new") go("new"); else if (S.w.step === 3) stepCompose(); else render(); }
+
+/* --- публикация --- */
+function stepPublish() {
+  const w = S.w;
+  if (w.result) return renderResult();
+  const lim = S.config.daily_limit;
+  const h = `<div class="panel">
+      <button class="row" onclick="setMode('once')"><div class="grow"><div class="title">Опубликовать сейчас</div><div class="sub">Один выход во всех оплаченных чатах</div></div><span class="toggle ${w.mode === "once" ? "on" : ""}"></span></button>
+      <button class="row" onclick="setMode('auto')"><div class="grow"><div class="title">Сейчас и ещё 2 раза автоматически</div><div class="sub">Посты выйдут с выбранным интервалом</div></div><span class="toggle ${w.mode === "auto" ? "on" : ""}"></span></button>
+      ${w.mode === "auto" ? `<div class="row"><div class="grow"><div class="sub" style="margin-bottom:8px">Интервал</div><div class="chips">${[4, 6, 8, 12].map(n => `<button class="${w.interval === n ? "on" : ""}" onclick="setInt(${n})">${n} ч</button>`).join("")}</div></div></div>` : ""}
+    </div>
+    <div class="panel" style="margin-top:12px"><label class="check"><input type="checkbox" id="tplchk" ${w.saveTpl ? "checked" : ""}><span>Сохранить как шаблон</span></label></div>
+    <p class="small muted" style="margin:12px 4px">В день можно выложить до ${lim} ${plural(lim, "поста", "постов", "постов")} в одной сети города (автопосты тоже считаются).</p>
+    <button class="btn gold block" id="pubbtn" onclick="doPublish()">Опубликовать</button>`;
+  $("#wbody").innerHTML = h;
+  $("#tplchk").onchange = e => S.w.saveTpl = e.target.checked;
+}
+function setMode(m) { S.w.mode = m; haptic(); stepPublish(); }
+function setInt(n) { S.w.interval = n; haptic(); stepPublish(); }
+async function doPublish() {
+  const w = S.w, c = S.cities.find(x => x.name === w.city);
+  const btn = $("#pubbtn"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Публикуем…`;
+  const j = await api("publish", { net: w.net, city: c.token, text: w.text, media: w.media.filter(m => m.id).map(m => ({ type: m.type, id: m.id })), mode: w.mode, interval: w.interval, save_template: w.saveTpl });
+  if (!j.ok) { haptic("err"); btn.disabled = false; btn.textContent = "Опубликовать"; return toast(j.error); }
+  S.subs = j.subs; w.result = j; S.posts = null;
+  haptic(j.result.published.length ? "ok" : "err");
+  if (j.result.published.length) { w.text = ""; w.media = []; w.check = null; saveDraft(); }
+  renderResult();
+}
+function renderResult() {
+  const j = S.w.result, r = j.result;
+  let h = r.published.length
+    ? `<div class="center" style="padding:24px 10px 10px"><div style="font-size:44px">🎉</div><b>Опубликовано: ${r.published.length} ${plural(r.published.length, "чат", "чата", "чатов")}</b>${j.auto ? `<span class="muted">Ещё ${j.auto.left} выхода — каждые ${j.auto.interval} ч.</span>` : ""}</div>`
+    : `<div class="note bad">Объявление не вышло. ${r.limit.length ? "Дневной лимит исчерпан." : ""}</div>`;
+  h += `<div class="panel result">`;
+  r.published.forEach(p => h += `<button class="row" onclick="openTg('${esc(p.link)}')"><div class="grow"><div class="title">${esc(p.network)}</div><div class="sub">${esc(p.chat)}</div></div><span class="badge-ok">✓</span><span class="chev">›</span></button>`);
+  r.limit.forEach(n => h += `<div class="row"><div class="grow"><div class="title">${esc(n)}</div><div class="sub">На сегодня лимит исчерпан</div></div><span class="badge-bad">—</span></div>`);
+  r.errors.forEach(e => h += `<div class="row"><div class="grow"><div class="title">${esc(e.network)}, ${esc(e.chat)}</div><div class="sub">${esc(e.error)}</div></div><span class="badge-bad">!</span></div>`);
+  h += `</div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn soft" onclick="go('posts')">Мои посты</button><button class="btn primary" onclick="S.w.result=null;S.w.step=3;render()">Новое объявление</button></div>`;
+  $("#wbody").innerHTML = h;
+}
+
+/* ================= ПОСТЫ ================= */
+async function viewPosts() {
+  let h = `<div class="wrap"><h1>Посты</h1><div class="seg"><button class="${S.postsSeg === "posts" ? "on" : ""}" onclick="S.postsSeg='posts';viewPosts()">Опубликованные</button><button class="${S.postsSeg === "autos" ? "on" : ""}" onclick="S.postsSeg='autos';viewPosts()">Автопосты</button></div><div id="plist"><div class="center"><span class="spin"></span></div></div></div>`;
+  $("#app").innerHTML = h;
+  if (!S.posts) { const j = await api("posts"); if (!j.ok) return toast(j.error); S.posts = j.posts; S.autos = j.autoposts; }
+  if (S.tab !== "posts") return;
+  let b = "";
+  if (S.postsSeg === "posts") {
+    if (!S.posts.length) b = `<div class="empty"><div class="big">🗒</div><b>Активных постов нет</b><p>Опубликованные объявления появятся здесь — их можно открыть или удалить.</p><button class="btn gold block" onclick="go('new')">Разместить объявление</button></div>`;
+    else b = `<div class="panel">${S.posts.map(p => `<div class="row"><div class="grow"><div class="title">${esc(p.network)}</div><div class="sub">${esc(p.city)}, ${esc(p.time)}${p.auto ? ", автопост" : ""}</div></div><button class="linkbtn" onclick="openTg('${esc(p.link)}')">Открыть</button><button class="btn danger" style="flex:none;min-height:34px;padding:0 10px" onclick="delPost('${p.id}')">Удалить</button></div>`).join("")}</div>
+      <div style="height:12px"></div><button class="btn danger block" onclick="delAll()">Удалить все объявления</button>`;
+  } else {
+    if (!S.autos.length) b = `<div class="empty"><div class="big">🔁</div><b>Автопостов нет</b><p>При публикации выберите «Сейчас и ещё 2 раза автоматически».</p></div>`;
+    else b = `<div class="panel">${S.autos.map(a => `<div class="row"><div class="grow"><div class="title">${esc(a.network)}, ${esc(a.city)}</div><div class="sub">Следующий выход ${esc(a.next)}, осталось ${a.left}, каждые ${a.interval} ч</div></div><button class="btn danger" style="flex:none;min-height:34px;padding:0 10px" onclick="cancelAuto('${a.id}')">Отменить</button></div>`).join("")}</div>`;
+  }
+  $("#plist").innerHTML = b;
+}
+async function delPost(id) { if (!await confirmBox("Удалить объявление из чата?")) return; const j = await api("posts/delete", { id }); if (!j.ok) return toast(j.error); haptic("ok"); toast("Удалено"); S.posts = null; viewPosts(); }
+async function delAll() { if (!await confirmBox("Удалить ВСЕ ваши объявления из всех чатов?")) return; const j = await api("posts/delete", { all: true }); if (!j.ok) return toast(j.error); haptic("ok"); toast("Удалено: " + j.deleted); S.posts = null; viewPosts(); }
+async function cancelAuto(id) { if (!await confirmBox("Отменить автопостинг?")) return; await api("autoposts/cancel", { id }); haptic("ok"); S.posts = null; viewPosts(); }
+
+/* ================= ЕЩЁ ================= */
+function viewMore() {
+  if (S.sub === "tpl") return viewTemplates();
+  if (S.sub === "chan") return viewChannel();
+  if (S.sub === "how") return viewHow();
+  $("#app").innerHTML = `<div class="wrap"><h1>Ещё</h1>
+    <div class="panel">
+      <button class="row" onclick="S.sub='tpl';render()"><div class="grow"><div class="title">📝 Шаблоны</div><div class="sub">Готовые тексты с фото для быстрой публикации</div></div><span class="chev">›</span></button>
+      <button class="row" onclick="S.sub='chan';render()"><div class="grow"><div class="title">📢 Реклама канала или группы</div><div class="sub">${S.approved ? "Одобрено — можно покупать размещение" : "Нужна проверка администратором"}</div></div><span class="chev">›</span></button>
+      <button class="row" onclick="S.sub='how';render()"><div class="grow"><div class="title">🧮 Как считается цена</div><div class="sub">Тарифы, скидки, курс</div></div><span class="chev">›</span></button>
+      <button class="row" onclick="openTg('${esc(S.support)}')"><div class="grow"><div class="title">💬 Поддержка</div><div class="sub">Вопросы по оплате и размещению</div></div><span class="chev">›</span></button>
+    </div></div>`;
+}
+async function viewTemplates() {
+  $("#app").innerHTML = `<div class="wrap"><h1>Шаблоны</h1><div id="tl"><div class="center"><span class="spin"></span></div></div></div>`;
+  const j = await api("templates"); if (!j.ok) return toast(j.error);
+  S._tpls = j.templates;
+  $("#tl").innerHTML = j.templates.length ? `<div class="panel">${j.templates.map((t, i) => `<div class="row"><div class="grow"><div class="title">${esc(t.name)}</div><div class="sub">${esc(t.text.slice(0, 100))}${t.media.length ? ", 📎 " + t.media.length : ""}</div></div><button class="linkbtn" onclick="useTpl(${i});S.sub=null">Использовать</button><button class="btn danger" style="flex:none;min-height:34px;padding:0 10px" onclick="delTpl('${t.id}')">✕</button></div>`).join("")}</div>`
+    : `<div class="empty"><div class="big">📝</div><b>Шаблонов пока нет</b><p>Отметьте «Сохранить как шаблон» при публикации — и в следующий раз объявление заполнится в одно касание.</p></div>`;
+}
+async function delTpl(id) { if (!await confirmBox("Удалить шаблон?")) return; await api("templates/delete", { id }); viewTemplates(); }
+function viewChannel() {
+  $("#app").innerHTML = `<div class="wrap"><h1>Реклама канала</h1>
+    <p class="muted">Рекламу Telegram-каналов и групп сначала проверяет администратор. После одобрения к прайсу добавляется наценка ×${S.config.vip_markup} и разрешаются ссылки.</p>
+    ${S.approved ? `<div class="note ok">Ваш ресурс одобрен. Выберите город — цены уже с учётом наценки.</div><button class="btn gold block" onclick="S.sub=null;startNew()">Выбрать город</button>`
+      : `<div class="panel" style="padding:14px 16px"><input class="search" id="chl" placeholder="Ссылка на канал или @username" style="background:var(--bg2);margin:0"></div><div style="height:12px"></div><button class="btn primary block" onclick="sendChan()">Отправить на проверку</button>`}</div>`;
+}
+async function sendChan() { const link = ($("#chl").value || "").trim(); const j = await api("channel_request", { link }); if (!j.ok) return toast(j.error); haptic("ok"); toast("Заявка отправлена. Ответ придёт в бот."); S.sub = null; render(); }
+function viewHow() {
+  const c = S.config;
+  $("#app").innerHTML = `<div class="wrap howto"><h1>Как считается цена</h1>
+    <div class="f"><b>Базовая цена</b><p class="muted small">Зависит от размера чата (больше или меньше 1000 участников) и срока: ${c.days.join(", ")} дней. Для крупных общих чатов — отдельный тариф.</p></div>
+    <div class="f"><b>Все сети города</b><p class="muted small">Цена одной сети × число сетей, которые у вас ещё не оплачены. Скидка за пакет: 3 сети −10%, 4 — −20%, 5 — −30%.</p></div>
+    ${c.renew_pct ? `<div class="f"><b>Продление −${c.renew_pct}%</b><p class="muted small">Пока доступ идёт и ещё ${c.renew_grace_days} ${plural(c.renew_grace_days, "день", "дня", "дней")} после окончания. Новый срок добавляется к текущему — оставшиеся дни не сгорают.</p></div>` : ""}
+    <div class="f"><b>Закреп +${Math.round((c.pin_markup - 1) * 100)}%</b><p class="muted small">Ваши посты закрепляются в чате.</p></div>
+    <div class="f"><b>Реклама канала ×${c.vip_markup}</b><p class="muted small">После одобрения администратором, со ссылками.</p></div>
+    <div class="f"><b>Промокод</b><p class="muted small">Применяется последним: процент или фиксированная сумма в звёздах.</p></div>
+    <div class="f"><b>Курс</b><p class="muted small">1 ⭐️ = ${c.rub_per_star} ₽ (крипта, кэшбэк, карта) = ${c.points_per_star} очков.</p></div>
+    <div class="f"><b>Лимит</b><p class="muted small">До ${c.daily_limit} публикаций в день в одной сети города.</p></div></div>`;
+}
+
+/* ---------- шторка ---------- */
+function sheet(html) {
+  closeSheet();
+  const bg = document.createElement("div"); bg.className = "sheet-bg"; bg.id = "sheet";
+  bg.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div>${html}</div>`;
+  bg.onclick = e => { if (e.target === bg) closeSheet(); };
+  document.body.appendChild(bg);
+}
+function closeSheet() { const s = $("#sheet"); if (s) s.remove(); }
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && S.user && S.tab === "home") { const r = await api("subs"); if (r.ok) { S.subs = r.subs; S.balances = r.balances; render(); } }
+});
+boot();
+</script>
+</body>
+</html>

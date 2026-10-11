@@ -21,7 +21,10 @@ _NET_DEFAULTS = {
     "mp_daily_limit": 3,          # публикаций в день на одну сеть/город
     "mp_vip_markup": 1.5,         # наценка за рекламу TG-групп/каналов
     "mp_pin_markup": 1.2,         # наценка за закреп
+    "mp_renew_discount": 10,      # скидка на продление, %
+    "mp_renew_grace_days": 3,     # сколько дней после окончания ещё действует скидка на продление
 }
+_ZERO_OK = {"mp_renew_discount", "mp_renew_grace_days"}  # 0 = выключено
 _cfg_cache = {"t": 0.0, "doc": {}}
 
 
@@ -45,7 +48,7 @@ def net_cfg(key):
             v = float(raw)
         else:
             return str(raw).strip() or default
-        return v if v > 0 else default
+        return v if (v > 0 or (key in _ZERO_OK and v == 0)) else default
     except (TypeError, ValueError):
         return default
 
@@ -282,6 +285,7 @@ admins_collection = db['admins']            # НОВАЯ: Список адми�
 # ADMIN ID (ваш ID)
 ADMIN_CHAT_ID = -1002196190507
 ADS_THREAD_ID = 263952  # 👈 Добавляем ID папки Рекламы
+CABINET_URL = ""  # адрес мини-аппа «Рекламный кабинет» (заполняется при старте, см. _setup_public_urls)
 
 # 🔒 Вечные (статичные) админы
 CORE_ADMINS = [479938867, 7235010425]
@@ -589,6 +593,32 @@ def multi_net_discount(n):
     return 0
 
 
+def _aware(dt):
+    """Mongo отдаёт даты без часового пояса (UTC) — приводим к aware для сравнения с now_ekb()."""
+    if isinstance(dt, datetime) and dt.tzinfo is None:
+        return pytz.utc.localize(dt)
+    return dt
+
+
+def renewal_info(user_id, net_key, city):
+    """Скидка на продление: у человека есть (или недавно был) доступ к этой сети в этом городе.
+    Действует, пока доступ активен, и ещё N дней после окончания (настройки в /glaz).
+    -> {"pct", "active_end", "grace_until"} или None."""
+    pct = int(net_cfg("mp_renew_discount"))
+    if pct <= 0 or net_key not in NET_NAMES:
+        return None
+    grace = int(net_cfg("mp_renew_grace_days"))
+    names = ["Все сети"] if net_key == "all" else [NET_NAMES[net_key], "Все сети"]
+    since = now_ekb() - timedelta(days=grace)
+    last = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": names},
+                                        "end_date": {"$gte": since}}, sort=[("end_date", -1)])
+    if not last:
+        return None
+    end = _aware(last["end_date"])
+    return {"pct": min(pct, 90), "active_end": end, "grace_until": end + timedelta(days=grace),
+            "active": end > now_ekb()}
+
+
 def calc_ad_price(user_id, days, net_key, city, is_pin=False, promo=None):
     """ЕДИНСТВЕННОЕ место расчёта цены рекламы (меню, промокод, продление, счёт, оплата балансом).
     -> dict или None, если город/сеть/срок недоступны."""
@@ -628,12 +658,21 @@ def calc_ad_price(user_id, days, net_key, city, is_pin=False, promo=None):
         buying_now, discount_net = 1, 0
         price = int(base * multiplier)
 
+    # ♻️ Скидка на продление (удержание): тем, у кого доступ ещё идёт или закончился недавно
+    ren = renewal_info(user_id, net_key, city)
+    renew_discount = ren["pct"] if ren else 0
+    if renew_discount:
+        price = int(price * (1 - renew_discount / 100))
+
     if is_pin:
         price = int(price * float(net_cfg("mp_pin_markup")))
     before_promo = max(1, price)
     final = apply_promo(before_promo, promo)
     return {"amount": final, "before_promo": before_promo, "network": NET_NAMES.get(net_key, net_key),
-            "is_vip": is_vip, "discount_net": discount_net, "buying_now": buying_now}
+            "is_vip": is_vip, "discount_net": discount_net, "buying_now": buying_now,
+            "renew_discount": renew_discount, "base": int(base), "multiplier": multiplier,
+            "pin_markup": float(net_cfg("mp_pin_markup")) if is_pin else 1.0,
+            "promo_value": (promo or {}).get("value"), "promo_type": (promo or {}).get("type") if promo else None}
 
 
 def build_tariff_markup(user_id, net_key, city, promo=None):
@@ -648,6 +687,8 @@ def build_tariff_markup(user_id, net_key, city, promo=None):
         prefix = "🔥 VIP:" if q["is_vip"] else "💳"
         if promo:
             label = f"{prefix} {days} дн. (-{promo.get('value')}{'⭐️' if promo.get('type') == 'fixed' else '%'} за {q['amount']}⭐️)"
+        elif q["renew_discount"]:
+            label = f"♻️ {days} дн. (-{q['renew_discount']}% за {q['amount']}⭐️)"
         elif q["discount_net"]:
             label = f"{prefix} {days} дн. (-{q['discount_net']}% за {q['amount']}⭐️)"
         else:
@@ -672,8 +713,15 @@ def add_revenue(rtype, amount, uid=None, currency=None):
 
 
 def grant_ad_access(user_id, network, city, days, has_pin, can_post_links, how):
-    """Выдача рекламного доступа после любой оплаты (звёзды, крипта, баланс, очки)."""
-    end_date = now_ekb() + timedelta(days=days)
+    """Выдача рекламного доступа после любой оплаты (звёзды, крипта, баланс, очки).
+    Продление идёт ОТ КОНЦА текущего доступа к той же сети/городу — раньше оставшиеся дни сгорали."""
+    start = now_ekb()
+    current = ad_subs_collection.find_one({"user_id": user_id, "network": network, "city": city,
+                                           "end_date": {"$gt": now_ekb()}}, sort=[("end_date", -1)])
+    if current:
+        start = max(start, _aware(current["end_date"]))
+    end_date = start + timedelta(days=days)
+    left_h = (end_date - now_ekb()).total_seconds() / 3600
     ad_subs_collection.insert_one({
         "user_id": user_id,
         "network": network,
@@ -682,10 +730,11 @@ def grant_ad_access(user_id, network, city, days, has_pin, can_post_links, how):
         "purchase_date": now_ekb(),
         "has_pin": has_pin,
         "can_post_links": can_post_links,
-        "notified_72h": days <= 3,
-        "notified_24h": days <= 1,
+        "notified_72h": left_h <= 72,
+        "notified_24h": left_h <= 24,
         "notified_3h": False,
         "paid_by": how,
+        "renewed_from": current["_id"] if current else None,
     })
     # Сбрасываем временный статус, чтобы следующая покупка не была с наценкой
     db['users'].update_one({"_id": user_id}, {"$unset": {"temp_ad_type": "", "temp_promo": ""}})
@@ -696,7 +745,8 @@ def grant_ad_access(user_id, network, city, days, has_pin, can_post_links, how):
         try: bot.send_message(ADMIN_CHAT_ID, f"💰 Новая продажа рекламы ({how}): {user_id}, {network}, {city}, {days} дн.")
         except Exception: pass
     try:
-        bot.send_message(user_id, f"✅ <b>Оплата получена!</b>\n\nДоступ к сети <b>{escape_html(network)}</b> ({escape_html(city)}) открыт на {days} дн.\nЖмите «Создать новое объявление», чтобы разместить пост!",
+        bot.send_message(user_id, f"✅ <b>Оплата получена!</b>\n\nДоступ к сети <b>{escape_html(network)}</b> ({escape_html(city)}) открыт до <b>{end_date.astimezone(ekb_tz).strftime('%d.%m.%Y %H:%M')}</b> (ЕКБ)."
+                         + (" Дни продления добавлены к текущему сроку." if current else "") + "\nЖмите «Создать новое объявление», чтобы разместить пост!",
                          parse_mode="HTML", reply_markup=get_main_keyboard())
     except Exception:
         pass
@@ -734,7 +784,16 @@ def get_main_keyboard():
     markup.add("Создать новое объявление", "📝 Мои шаблоны")
     markup.add("Удалить объявление", "Удалить все объявления")
     markup.add("🔁 Мои автопосты", "📊 Моя статистика") # 👈 НОВАЯ КНОПКА ЗДЕСЬ
+    markup.add("📱 Рекламный кабинет")
     return markup
+
+
+def cabinet_inline_markup(text="📱 Открыть рекламный кабинет"):
+    if not CABINET_URL:
+        return None
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton(text, web_app=types.WebAppInfo(CABINET_URL)))
+    return m
 
 def format_time(dt):
     if isinstance(dt, str):
@@ -903,6 +962,10 @@ def start(message):
             "Привет! Я PostGoldBot. 👋\nВыберите действие:",
             reply_markup=get_main_keyboard()
         )
+        cab = cabinet_inline_markup()
+        if cab:
+            bot.send_message(message.chat.id, "✨ <b>Новое: рекламный кабинет.</b>\nВсё в одном окне: города и цены, объявление с предпросмотром, оплата, ваши посты и продление.",
+                             parse_mode="HTML", reply_markup=cab)
     except Exception as e:
         bot.send_message(ADMIN_CHAT_ID, f"Ошибка в /start: {e}")
 
@@ -1844,93 +1907,123 @@ def send_ad(chat_id, media_type, file_id, media_array, full_text, reply_markup):
     return sent_msg.message_id, None
 
 
-def publish_precheck(message, raw_text, selected_network, city):
-    """Проверки перед публикацией (и перед запуском автопоста): бан, стоп-слова, ссылки.
-    Нужны и здесь: текст из шаблона раньше вообще не проверялся словарём."""
-    user_id = message.from_user.id
+def precheck_core(user_id, raw_text, selected_network, city):
+    """Проверки перед публикацией: бан, доступ, стоп-слова, ссылки. Общие для бота и кабинета.
+    -> None (всё ок) или текст ошибки (HTML)."""
     if is_banned_in_network(user_id):
-        bot.send_message(message.chat.id, BANNED_TEXT, reply_markup=get_main_keyboard())
-        return False
+        return BANNED_TEXT
     nets = ALL_NETWORKS if selected_network == "Все сети" else [selected_network]
     sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети"] + nets}, "end_date": {"$gt": now_ekb()}}, sort=[("can_post_links", -1)])
     if not sub:
-        bot.send_message(message.chat.id, "⛔ Срок доступа истёк. Продлите доступ, чтобы публиковать.", reply_markup=get_main_keyboard())
-        return False
+        return "⛔ Срок доступа истёк. Продлите доступ, чтобы публиковать."
+    if not (raw_text or "").strip():
+        return "❌ Текст объявления пустой."
+    if len(raw_text) > 3500:
+        return "❌ Текст слишком длинный (максимум 3500 символов)."
     can_links = sub.get("can_post_links", False)
     is_bad, trigger_word = check_stop_words(raw_text, ignore_black_zone=can_links)
     if is_bad:
-        bot.send_message(message.chat.id, f"❌ <b>Объявление отклонено!</b>\nВ тексте найдено запрещённое слово: <b>{escape_html(trigger_word)}</b>.\nИсправьте текст и создайте объявление заново.", parse_mode="HTML", reply_markup=get_main_keyboard())
-        return False
+        return f"❌ <b>Объявление отклонено!</b>\nВ тексте найдено запрещённое слово: <b>{escape_html(trigger_word)}</b>."
     if not can_links and has_links(raw_text):
-        bot.send_message(message.chat.id, "❌ Ссылки и @username запрещены! Уберите их из текста и создайте объявление заново.", reply_markup=get_main_keyboard())
+        return "❌ Ссылки и @username запрещены! Уберите их из текста."
+    return None
+
+
+def publish_precheck(message, raw_text, selected_network, city):
+    """Обёртка для чат-воронки: показывает ошибку сообщением."""
+    err = precheck_core(message.from_user.id, raw_text, selected_network, city)
+    if err:
+        bot.send_message(message.chat.id, err + ("" if err == BANNED_TEXT else "\nИсправьте и создайте объявление заново."),
+                         parse_mode="HTML", reply_markup=get_main_keyboard())
         return False
     return True
 
 
-def publish_ad_now(message, text, media_type, file_id, selected_network, city):
-    """Разовая публикация. -> True, если вышла хотя бы в одном чате."""
-    if not publish_precheck(message, text, selected_network, city):
-        return False
-    user_id = message.from_user.id
-    user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
-    text = escape_html(text)
+def media_kind(media_array):
+    """[{type,id}] -> (media_type, file_id) в формате send_ad."""
+    media_array = media_array or []
+    if len(media_array) == 1:
+        return media_array[0]['type'], media_array[0]['id']
+    if len(media_array) > 1:
+        return "album", "album_data"
+    return None, None
+
+
+def publish_core(user, raw_text, media_array, selected_network, city):
+    """Публикация объявления во все оплаченные чаты сети/города (бот и кабинет).
+    user — объект с id/first_name/last_name. -> {"published": [...], "limit": [...], "errors": [...]}"""
+    user_id = user.id
+    user_name = f'<b>{get_user_html_link(user)}</b>'
+    text = escape_html(raw_text)
+    media_type, file_id = media_kind(media_array)
     networks = ALL_NETWORKS if selected_network == "Все сети" else [selected_network]
-    was_published = False
+    result = {"published": [], "limit": [], "errors": []}
 
     for network in networks:
         net_key = normalize_network_key(network)
         city_data = all_cities.get(city, {}).get(net_key)
-
         if not city_data: continue
 
-        # --- Проверка лимитов ---
-        user_stats = get_user_statistics(user_id)
-        city_stats = user_stats.get("details", {}).get(network, {}).get(city, {})
-
-        if city_stats.get("remaining", 0) <= 0:
-            bot.send_message(message.chat.id, f"⛔ Лимит публикаций на сегодня исчерпан для <b>{escape_html(network)}</b> ({escape_html(city)})", parse_mode="HTML")
-            continue
-
-        # --- Проверка на ссылки (Наша новая логика) ---
         sub = ad_subs_collection.find_one({"user_id": user_id, "city": city, "network": {"$in": ["Все сети", network]}, "end_date": {"$gt": now_ekb()}})
-        can_post_links = sub.get("can_post_links", False) if sub else False
-
         if not sub:
             continue  # эта сеть не оплачена (для «Все сети» — только оплаченные)
 
-        # --- Публикация ---
+        # --- Проверка лимитов ---
+        city_stats = get_user_statistics(user_id).get("details", {}).get(network, {}).get(city, {})
+        if city_stats.get("remaining", 0) <= 0:
+            result["limit"].append(network)
+            continue
+
         signature = network_signatures.get(network, "")
         full_text = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
-        
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
 
         for location in city_data:
             chat_id = location["chat_id"]
             try:
-                media_array = None
-                if media_type == "album":
-                    user_data = db['users'].find_one({"_id": user_id}) or {}
-                    media_array = user_data.get("temp_ad_media", [])
                 main_msg_id, media_msg_ids = send_ad(chat_id, media_type, file_id, media_array, full_text, reply_markup)
-
-                # 💥 Пишем в историю, передавая media_msg_ids
-                add_post_to_history(user_id, message.from_user.first_name or "Без имени", network, city, chat_id, main_msg_id, media_message_ids=media_msg_ids)
-                
-                bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{network}</b> ({location['name']}).", parse_mode="HTML")
-                was_published = True
-
-                if sub and sub.get("has_pin"):
+                add_post_to_history(user_id, getattr(user, "first_name", None) or "Без имени", network, city, chat_id, main_msg_id, media_message_ids=media_msg_ids)
+                result["published"].append({"network": network, "chat": location["name"], "chat_id": chat_id, "message_id": main_msg_id})
+                if sub.get("has_pin"):
                     try: bot.pin_chat_message(chat_id, main_msg_id, disable_notification=True)
-                    except: pass
+                    except Exception: pass
+            except Exception as e:
+                desc = getattr(e, "description", None) or str(e)
+                result["errors"].append({"network": network, "chat": location["name"], "error": desc})
+                log_error("публикация", f"{network}/{location.get('name')}: {desc}", user_id)
+    return result
 
-            except telebot.apihelper.ApiTelegramException as e:
-                bot.send_message(message.chat.id, f"❌ Ошибка в {network}: {e.description}")
-                log_error("публикация", f"{network}/{location.get('name')}: {e.description}", user_id)
 
-    return was_published
+def publish_ad_now(message, text, media_type, file_id, selected_network, city):
+    """Разовая публикация из чат-воронки. -> True, если вышла хотя бы в одном чате."""
+    if not publish_precheck(message, text, selected_network, city):
+        return False
+    media_array = []
+    if media_type == "album":
+        media_array = (db['users'].find_one({"_id": message.from_user.id}) or {}).get("temp_ad_media", [])
+    elif media_type in ("photo", "video") and file_id:
+        media_array = [{"type": media_type, "id": file_id}]
+    res = publish_core(message.from_user, text, media_array, selected_network, city)
+    for p in res["published"]:
+        bot.send_message(message.chat.id, f"✅ Опубликовано в <b>{escape_html(p['network'])}</b> ({escape_html(p['chat'])}).", parse_mode="HTML")
+    for net in res["limit"]:
+        bot.send_message(message.chat.id, f"⛔ Лимит публикаций на сегодня исчерпан для <b>{escape_html(net)}</b> ({escape_html(city)})", parse_mode="HTML")
+    for e in res["errors"]:
+        bot.send_message(message.chat.id, f"❌ Ошибка в {e['network']}: {e['error']}")
+    return bool(res["published"])
 
 # ==================== УПРАВЛЕНИЕ ШАБЛОНАМИ ====================
+
+@bot.message_handler(func=lambda message: message.text == "📱 Рекламный кабинет")
+def open_cabinet(message):
+    if message.chat.type != "private": return
+    cab = cabinet_inline_markup()
+    if cab:
+        bot.send_message(message.chat.id, "Нажмите, чтобы открыть кабинет 👇", reply_markup=cab)
+    else:
+        bot.send_message(message.chat.id, "Кабинет ещё запускается, попробуйте через минуту.")
+
 
 @bot.message_handler(func=lambda message: message.text == "📝 Мои шаблоны")
 def handle_my_templates(message):
@@ -2063,6 +2156,7 @@ def handle_new_post_choice(message):
         "Удалить все объявления": handle_user_delete_all_ads,
         "🔁 Мои автопосты": handle_my_autoposts,
         "📊 Моя статистика": handle_stats_button,
+        "📱 Рекламный кабинет": open_cabinet,
     }
     if answer in menu:
         menu[answer](message)
@@ -2339,26 +2433,39 @@ def webhook():
     return 'ok', 200
 
 
-def _ensure_webhook_secret():
-    """Перерегистрирует текущий адрес вебхука уже с секретом. Адрес берём у самого Telegram,
-    поэтому отдельная переменная с URL не нужна. Без WEBHOOK_SECRET_MP ничего не меняется."""
-    if not WEBHOOK_SECRET:
-        print("⚠️ МП: WEBHOOK_SECRET_MP не задан — /webhook открыт всем!", flush=True)
-        return
+def _setup_public_urls():
+    """При старте: узнаём свой адрес (APP_URL_MP или адрес вебхука у Telegram), ставим секрет на вебхук
+    и кнопку «📱 Кабинет» в меню бота."""
+    global CABINET_URL
     try:
-        url = (os.getenv("APP_URL_MP") or "").rstrip('/')
-        url = f"{url}/webhook" if url else bot.get_webhook_info().url
-        if not url:
-            print("⚠️ МП: адрес вебхука неизвестен (задайте APP_URL_MP)", flush=True)
+        base = (os.getenv("APP_URL_MP") or "").rstrip('/')
+        if not base:
+            wh = bot.get_webhook_info().url or ""
+            base = wh[:-len("/webhook")] if wh.endswith("/webhook") else ""
+        if not base:
+            print("⚠️ МП: свой адрес неизвестен (задайте APP_URL_MP) — кабинет и секрет вебхука не настроены", flush=True)
             return
-        bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
-                        allowed_updates=["message", "callback_query", "pre_checkout_query"])
-        print(f"✅ МП: вебхук с секретом установлен ({url})", flush=True)
+        if base.startswith("http://"):
+            base = "https://" + base[len("http://"):]
+        CABINET_URL = f"{base}/cabinet"
+
+        if WEBHOOK_SECRET:
+            bot.set_webhook(url=f"{base}/webhook", secret_token=WEBHOOK_SECRET,
+                            allowed_updates=["message", "callback_query", "pre_checkout_query"])
+            print(f"✅ МП: вебхук с секретом установлен ({base}/webhook)", flush=True)
+        else:
+            print("⚠️ МП: WEBHOOK_SECRET_MP не задан — /webhook открыт всем!", flush=True)
+
+        try:
+            bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp("web_app", "📱 Кабинет", types.WebAppInfo(CABINET_URL)))
+            print(f"✅ МП: кнопка кабинета в меню ({CABINET_URL})", flush=True)
+        except Exception as e:
+            log_error("кнопка кабинета", e)
     except Exception as e:
-        log_error("установка вебхука", e)
+        log_error("старт: адрес/вебхук", e)
 
 
-threading.Thread(target=_ensure_webhook_secret, daemon=True).start()
+threading.Thread(target=_setup_public_urls, daemon=True).start()
 
 
 @app.route('/')
@@ -2543,28 +2650,12 @@ def handle_ad_checkout(call):
     user_data = db['users'].find_one({"_id": user_id}) or {}
     promo = get_valid_promo(user_data.get("temp_promo"), user_id) if user_data.get("temp_promo") else None
 
-    q = calc_ad_price(user_id, days, net_key, city, is_pin, promo)
-    if not q:
+    o = create_offer(user_id, days, net_key, city, is_pin, promo)
+    if not o:
         bot.answer_callback_query(call.id, "❌ Этот тариф сейчас недоступен.", show_alert=True)
         return
     bot.answer_callback_query(call.id)
-    amount, network, is_vip = q["amount"], q["network"], q["is_vip"]
-
-    # --- Вшиваем VIP метку в payload (формат общий со Скайнетом) ---
-    payload_base = "ad_access_vip" if is_vip else "ad_access"
-    payload = f"{payload_base}_discount_{days}_{net_key}_{city}_{promo['_id']}" if promo else f"{payload_base}_{days}_{net_key}_{city}"
-    if is_pin: payload += "_pin"
-
-    description_text = f"Сеть: {network}\nГород: {city}\nСрок: {days} дн."
-    if promo:
-        description_text += f"\n🎁 Промокод: {promo['_id']}"
-
-    # Счёт запоминаем на сервере: оплата балансом/очками и «альтернатива» берут цену отсюда, а не из кнопки
-    offer_id = mp_offers.insert_one({
-        "uid": user_id, "days": days, "net_key": net_key, "city": city, "pin": is_pin, "vip": is_vip,
-        "promo": promo["_id"] if promo else None, "amount": amount, "payload": payload,
-        "ts": time.time(), "dt": datetime.utcnow(),
-    }).inserted_id
+    amount, network, payload, offer_id, description_text = o["amount"], o["network"], o["payload"], o["offer_id"], o["description"]
 
     # 👇 ГЕНЕРИРУЕМ КРИПТО-ССЫЛКИ 👇
     crypto_payload = f"{payload}___{user_id}"
@@ -2611,6 +2702,27 @@ def handle_ad_checkout(call):
     except Exception as e:
         log_error("счёт", f"{payload}: {e}", user_id)
         bot.send_message(call.message.chat.id, "⚠️ Не удалось выставить счёт. Попробуйте ещё раз или напишите в поддержку.")
+
+
+def create_offer(user_id, days, net_key, city, is_pin, promo):
+    """Выставляет счёт: считает цену на сервере и запоминает её в mp_offers. Общая для бота и кабинета."""
+    q = calc_ad_price(user_id, days, net_key, city, is_pin, promo)
+    if not q:
+        return None
+    # --- Вшиваем VIP метку в payload (формат общий со Скайнетом) ---
+    payload_base = "ad_access_vip" if q["is_vip"] else "ad_access"
+    payload = f"{payload_base}_discount_{days}_{net_key}_{city}_{promo['_id']}" if promo else f"{payload_base}_{days}_{net_key}_{city}"
+    if is_pin: payload += "_pin"
+    description = f"Сеть: {q['network']}\nГород: {city}\nСрок: {days} дн." + ("\n📌 С закрепом" if is_pin else "")
+    if promo:
+        description += f"\n🎁 Промокод: {promo['_id']}"
+    offer_id = mp_offers.insert_one({
+        "uid": user_id, "days": days, "net_key": net_key, "city": city, "pin": is_pin, "vip": q["is_vip"],
+        "promo": promo["_id"] if promo else None, "amount": q["amount"], "payload": payload,
+        "ts": time.time(), "dt": datetime.utcnow(),
+    }).inserted_id
+    return {"offer_id": offer_id, "amount": q["amount"], "network": q["network"], "payload": payload,
+            "description": description, "quote": q}
 
 
 def _get_offer(offer_id, user_id):
@@ -2664,19 +2776,25 @@ def handle_ecosystem_payment(call):
 
     is_points = call.data.startswith('ad_eco_p_')
     offer_id = call.data[len('ad_eco_p_'):]
+    ok_, text = pay_offer_from_wallet(offer_id, user_id, is_points)
+    bot.answer_callback_query(call.id, None if ok_ else re.sub(r'<[^>]+>', '', text)[:190], show_alert=not ok_)
+    if ok_:
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception: pass
+
+
+def pay_offer_from_wallet(offer_id, user_id, is_points):
+    """Оплата выставленного счёта кэшбэком (₽) или очками. Общая для бота и кабинета.
+    -> (успех, текст)."""
     # Атомарно забираем счёт: двойной тап больше не спишет дважды
     try:
-        offer = mp_offers.find_one_and_delete({"_id": ObjectId(offer_id), "uid": user_id})
+        offer = mp_offers.find_one_and_delete({"_id": ObjectId(str(offer_id)), "uid": user_id})
     except Exception:
         offer = None
     if not offer:
-        bot.answer_callback_query(call.id, "Счёт уже оплачен или устарел. Выберите тариф заново.", show_alert=True)
-        return
-    bot.answer_callback_query(call.id)
-
+        return False, "Счёт уже оплачен или устарел. Выберите тариф заново."
     if is_banned_in_network(user_id):
-        bot.send_message(call.message.chat.id, BANNED_TEXT)
-        return
+        return False, BANNED_TEXT
 
     stars = int(offer["amount"])
     if is_points:
@@ -2688,8 +2806,7 @@ def handle_ecosystem_payment(call):
 
     promo = offer.get("promo")
     if promo and not consume_promo(promo, user_id):
-        bot.send_message(call.message.chat.id, "❌ Промокод уже исчерпан. Выберите тариф заново.", reply_markup=get_main_keyboard())
-        return
+        return False, "Промокод уже исчерпан. Выберите тариф заново."
 
     # Атомарное списание только при достаточном балансе (раньше find + $inc без условия → минус и двойное списание)
     res = db['paid_users'].find_one_and_update({"uid": user_id, field: {"$gte": cost}},
@@ -2697,8 +2814,7 @@ def handle_ecosystem_payment(call):
                                                return_document=ReturnDocument.AFTER)
     if not res:
         release_promo(promo, user_id)
-        bot.send_message(call.message.chat.id, f"❌ Ошибка транзакции: Недостаточно {currency_name} на счету!")
-        return
+        return False, f"Недостаточно {currency_name} на счету."
 
     # Журналы кошелька — в том же формате, что у Секретаря/Скайнета/BEYOND (/pts и веб-панель их видят)
     try:
@@ -2715,10 +2831,9 @@ def handle_ecosystem_payment(call):
     add_revenue(revenue_type, stars, user_id)
 
     network = NET_NAMES.get(offer["net_key"], offer["net_key"])
-    try: bot.delete_message(call.message.chat.id, call.message.message_id)
-    except: pass
     grant_ad_access(user_id, network, offer["city"], int(offer["days"]), bool(offer.get("pin")), bool(offer.get("vip")),
                     f"{'очки' if is_points else 'кэшбэк'}: {cost}{'₽' if not is_points else ' очк.'}")
+    return True, f"Оплачено: {cost} {currency_name}"
 
 @bot.callback_query_handler(func=lambda call: call.data == "insufficient_funds")
 def handle_insufficient_funds(call):
@@ -2726,54 +2841,89 @@ def handle_insufficient_funds(call):
 
 
 # --- ФОНОВЫЕ ЗАДАЧИ ---
+def _renew_markup(network_name, city):
+    # «Все сети» раньше продлевались как один «Мужской Клуб»
+    net_key = NET_KEYS.get(network_name, "mk")
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("♻️ Продлить доступ", callback_data=f"renew_{net_key}_{city_token(city)}"))
+    if CABINET_URL:
+        markup.add(types.InlineKeyboardButton("📱 Открыть кабинет", web_app=types.WebAppInfo(CABINET_URL)))
+    return markup
+
+
+def _already_renewed(sub):
+    """Есть доступ к той же сети/городу, который заканчивается позже этого — человек уже продлил."""
+    return bool(ad_subs_collection.find_one({
+        "user_id": sub["user_id"], "city": sub["city"], "network": {"$in": [sub["network"], "Все сети"]},
+        "_id": {"$ne": sub["_id"]}, "end_date": {"$gt": _aware(sub["end_date"]) + timedelta(hours=1)}}))
+
+
+def _claim(sub, flag):
+    """Атомарно ставим отметку: две копии бота не пришлют одно напоминание дважды."""
+    return ad_subs_collection.update_one({"_id": sub["_id"], flag: {"$ne": True}}, {"$set": {flag: True}}).modified_count > 0
+
+
+def _renew_line(sub):
+    pct = int(net_cfg("mp_renew_discount"))
+    if pct <= 0:
+        return "\n\n♻️ При продлении оставшиеся дни не сгорают — новый срок добавится к текущему."
+    return f"\n\n♻️ <b>Скидка −{pct}% на продление.</b> Оставшиеся дни не сгорят — новый срок добавится к текущему."
+
+
+REMINDERS = [
+    # (флаг, за сколько часов до конца, текст)
+    ("notified_72h", 72, "⏳ <b>Мягкое напоминание:</b>\nДоступ к <b>{net}</b> ({city}) заканчивается через 3 дня."),
+    ("notified_24h", 24, "🚨 <b>Остались сутки!</b>\nДоступ к <b>{net}</b> ({city}) закончится через 24 часа."),
+    ("notified_3h", 3, "🔥 <b>Сгорает через 3 часа!</b>\nДоступ к <b>{net}</b> ({city}) почти закончился — после этого посты публиковать нельзя."),
+]
+
+
+def _send_reminder(sub, text):
+    try:
+        bot.send_message(sub['user_id'], text, parse_mode="HTML", reply_markup=_renew_markup(sub['network'], sub['city']))
+    except Exception:
+        pass
+
+
 def check_expiring_subs():
-    """Фоновая задача: ищет подписки, истекающие через 72, 24 и 3 часа"""
+    """Фоновая задача удержания: напоминания до конца срока и предложение продлить со скидкой после."""
     while True:
         try:
             now = now_ekb()
-            
-            # --- Функция генерации кнопки продления ---
-            def get_renew_markup(network_name, city):
-                # «Все сети» раньше продлевались как один «Мужской Клуб»
-                net_key = NET_KEYS.get(network_name, "mk")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("♻️ Продлить подписку", callback_data=f"renew_{net_key}_{city_token(city)}"))
-                return markup
 
-            # 1. Проверка за 72 часа (3 дня)
-            target_72 = now + timedelta(hours=72)
-            expiring_72 = ad_subs_collection.find({"end_date": {"$gte": target_72 - timedelta(hours=1), "$lte": target_72 + timedelta(hours=1)}, "notified_72h": {"$ne": True}})
-            for sub in expiring_72:
-                try:
-                    # Сначала ставим отметку (атомарно): две копии бота не пришлют напоминание дважды
-                    if ad_subs_collection.update_one({"_id": sub["_id"], "notified_72h": {"$ne": True}}, {"$set": {"notified_72h": True}}).modified_count:
-                        bot.send_message(sub['user_id'], f"⏳ <b>Мягкое напоминание:</b>\nВаша подписка на <b>{sub['network']}</b> ({escape_html(sub['city'])}) истекает через 3 дня.\nПодготовьтесь к продлению, чтобы не терять клиентов!", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
-                except: pass
+            # 1. До окончания: за 72, 24 и 3 часа
+            for flag, hours, tpl in REMINDERS:
+                target = now + timedelta(hours=hours)
+                for sub in ad_subs_collection.find({"end_date": {"$gte": target - timedelta(hours=1), "$lte": target + timedelta(hours=1)}, flag: {"$ne": True}}):
+                    if not _claim(sub, flag):
+                        continue
+                    if _already_renewed(sub):
+                        continue  # уже продлил — не беспокоим (раньше напоминания шли и после продления)
+                    _send_reminder(sub, tpl.format(net=escape_html(sub['network']), city=escape_html(sub['city'])) + _renew_line(sub))
 
-            # 2. Проверка за 24 часа
-            target_24 = now + timedelta(hours=24)
-            expiring_24 = ad_subs_collection.find({"end_date": {"$gte": target_24 - timedelta(hours=1), "$lte": target_24 + timedelta(hours=1)}, "notified_24h": {"$ne": True}})
-            for sub in expiring_24:
-                try:
-                    # Сначала ставим отметку (атомарно): две копии бота не пришлют напоминание дважды
-                    if ad_subs_collection.update_one({"_id": sub["_id"], "notified_24h": {"$ne": True}}, {"$set": {"notified_24h": True}}).modified_count:
-                        bot.send_message(sub['user_id'], f"🚨 <b>Остались ровно 1 сутки!</b>\nВаш доступ к <b>{sub['network']}</b> ({escape_html(sub['city'])}) закончится через 24 часа!\n\nЖмите кнопку ниже, чтобы продлить доступ в пару кликов 👇", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
-                except: pass
+            grace = int(net_cfg("mp_renew_grace_days"))
+            pct = int(net_cfg("mp_renew_discount"))
+            if grace > 0 and pct > 0:
+                # 2. Сразу после окончания: «доступ закончился, скидка ещё действует N дней»
+                for sub in ad_subs_collection.find({"end_date": {"$gte": now - timedelta(days=grace), "$lte": now}, "notified_expired": {"$ne": True}}):
+                    if not _claim(sub, "notified_expired") or _already_renewed(sub):
+                        continue
+                    until = (_aware(sub["end_date"]) + timedelta(days=grace)).astimezone(ekb_tz).strftime('%d.%m %H:%M')
+                    _send_reminder(sub, f"⌛️ <b>Доступ к {escape_html(sub['network'])} ({escape_html(sub['city'])}) закончился.</b>\n"
+                                        f"Объявления больше не выходят, автопосты остановлены.\n\n"
+                                        f"🎁 Для вас сохраняем скидку <b>−{pct}%</b> на продление до <b>{until}</b> (ЕКБ).")
 
-            # 3. НОВОЕ: Экстренная проверка за 3 часа (Для тех, кто брал на 24 часа)
-            target_3 = now + timedelta(hours=3)
-            expiring_3 = ad_subs_collection.find({"end_date": {"$gte": target_3 - timedelta(hours=1), "$lte": target_3 + timedelta(hours=1)}, "notified_3h": {"$ne": True}})
-            for sub in expiring_3:
-                try:
-                    # Сначала ставим отметку (атомарно): две копии бота не пришлют напоминание дважды
-                    if ad_subs_collection.update_one({"_id": sub["_id"], "notified_3h": {"$ne": True}}, {"$set": {"notified_3h": True}}).modified_count:
-                        bot.send_message(sub['user_id'], f"🔥 <b>СГОРАЕТ ЧЕРЕЗ 3 ЧАСА!</b>\nДоступ к <b>{sub['network']}</b> ({escape_html(sub['city'])}) почти истек.\n\nПродлите сейчас, чтобы ваши посты не перестали публиковаться!", parse_mode="HTML", reply_markup=get_renew_markup(sub['network'], sub['city']))
-                except: pass
-
-            time.sleep(3600)
+                # 3. Последний шанс: за ~12 часов до конца скидки
+                last_from = now - timedelta(days=grace) + timedelta(hours=11)
+                last_to = now - timedelta(days=grace) + timedelta(hours=13)
+                for sub in ad_subs_collection.find({"end_date": {"$gte": last_from, "$lte": last_to}, "notified_lastcall": {"$ne": True}}):
+                    if not _claim(sub, "notified_lastcall") or _already_renewed(sub):
+                        continue
+                    _send_reminder(sub, f"⏰ <b>Последние 12 часов скидки −{pct}%</b> на продление {escape_html(sub['network'])} ({escape_html(sub['city'])}).\n"
+                                        f"Потом — обычная цена.")
         except Exception as e:
             log_error("напоминания о продлении", e)
-            time.sleep(60)
+        time.sleep(1800)  # раз в полчаса: окна по 2 часа не пропускаются
 
 # Запускаем поток
 threading.Thread(target=check_expiring_subs, daemon=True).start()
@@ -2889,6 +3039,14 @@ def _run_autopost(post, now):
 
 # 👇 ЗАПУСКАЕМ НАШ НОВЫЙ ПОТОК (Вставить перед if __name__ == '__main__':)
 threading.Thread(target=process_autoposts_worker, daemon=True).start()
+
+# === 📱 РЕКЛАМНЫЙ КАБИНЕТ (мини-апп): роуты в cabinet.py ===
+try:
+    import sys as _sys
+    from cabinet import register_cabinet
+    register_cabinet(app, _sys.modules[__name__])
+except Exception as _e:
+    log_error("кабинет не подключён", repr(_e))
 
 # === ДАТЧИК ПУЛЬСА РЕКЛАМНОГО БОТА ===
 def heartbeat_ads():
