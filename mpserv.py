@@ -23,8 +23,15 @@ _NET_DEFAULTS = {
     "mp_pin_markup": 1.2,         # наценка за закреп
     "mp_renew_discount": 10,      # скидка на продление, %
     "mp_renew_grace_days": 3,     # сколько дней после окончания ещё действует скидка на продление
+    "mp_pack_3": 10,              # «Все сети»: скидка за пакет из 3 сетей, %
+    "mp_pack_4": 20,              # … из 4 сетей
+    "mp_pack_5": 30,              # … из 5 сетей
+    "mp_autopost_extra": 2,       # автопост: сколько повторов после первого поста (0 — автопост выключен)
+    "mp_autopost_intervals": "4, 6, 8, 12",  # варианты интервала, часов
+    # подписи под объявлениями (HTML: <b>, <i>, <u>, <s>, <a href>); пусто — как по умолчанию
+    "mp_sig_mk": "", "mp_sig_parni": "", "mp_sig_ns": "", "mp_sig_rainbow": "", "mp_sig_gayznak": "",
 }
-_ZERO_OK = {"mp_renew_discount", "mp_renew_grace_days"}  # 0 = выключено
+_ZERO_OK = {"mp_renew_discount", "mp_renew_grace_days", "mp_pack_3", "mp_pack_4", "mp_pack_5", "mp_autopost_extra"}  # 0 = выключено
 _cfg_cache = {"t": 0.0, "doc": {}}
 
 
@@ -415,7 +422,7 @@ def refresh_matrix():
 refresh_matrix()
 # ===================================================================
 
-# Статичные подписи для каждой сети с новой строкой и дополнительной подписью
+# Подписи по умолчанию. Меняются в /glaz → «📢 МП (реклама)» (mp_sig_*), см. get_signature().
 network_signatures = {
     "Мужской Клуб": (
         "<b>Администрация сети не рекомендует вносить какую-либо предоплату. Если ВАС обманули или развели, сообщите в бота поддержки!</b>\n\n"
@@ -439,6 +446,74 @@ network_signatures = {
         "<i>Реклама. Не является публичной офертой.</i>"
     )
 }
+
+# заполняем дефолты настроек подписей текущими текстами
+for _k, _name in (("mk", "Мужской Клуб"), ("parni", "ПАРНИ 18+"), ("ns", "НС"), ("rainbow", "Радуга"), ("gayznak", "Гей Знакомства")):
+    _NET_DEFAULTS[f"mp_sig_{_k}"] = network_signatures[_name]
+
+from html.parser import HTMLParser
+
+
+class _SigCheck(HTMLParser):
+    """Проверка подписи из панели: только теги, которые понимает Telegram, и все закрыты.
+    Битая подпись иначе ломала бы ВСЕ публикации (Telegram отклоняет кривой HTML)."""
+    OK = {"b", "i", "u", "s", "a", "code", "strong", "em"}
+
+    def __init__(self):
+        super().__init__()
+        self.stack, self.bad = [], False
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in self.OK or (tag == "a" and not dict(attrs).get("href")):
+            self.bad = True
+        self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if not self.stack or self.stack.pop() != tag:
+            self.bad = True
+
+
+_bad_sig_reported = set()
+_SIG_KEYS = {"Мужской Клуб": "mk", "ПАРНИ 18+": "parni", "НС": "ns", "Радуга": "rainbow", "Гей Знакомства": "gayznak"}
+
+
+def get_signature(network_name):
+    """Подпись сети под объявлением: из панели /glaz, а если там пусто или HTML битый — по умолчанию."""
+    default = network_signatures.get(network_name, "")
+    key = _SIG_KEYS.get(network_name)
+    if not key:
+        return default
+    sig = str(net_cfg(f"mp_sig_{key}") or "").replace("\r\n", "\n").strip()
+    if not sig:
+        return default
+    chk = _SigCheck()
+    try:
+        chk.feed(sig); chk.close()
+    except Exception:
+        chk.bad = True
+    if chk.bad or chk.stack:
+        if sig not in _bad_sig_reported:
+            _bad_sig_reported.add(sig)
+            log_error("подпись сети с ошибкой в HTML — взята стандартная", f"{network_name}: {sig[:200]}")
+        return default
+    return sig
+
+
+def autopost_extra():
+    return int(net_cfg("mp_autopost_extra"))
+
+
+def autopost_intervals():
+    out = []
+    for part in str(net_cfg("mp_autopost_intervals")).replace(";", ",").split(","):
+        try:
+            v = int(part.strip())
+        except ValueError:
+            continue
+        if 1 <= v <= 24 and v not in out:
+            out.append(v)
+    return out[:6] or [4, 6, 8, 12]
+
 
 # 👇 ИСПРАВЛЕННЫЕ АНИМИРОВАННЫЕ БУКВЫ ДЛЯ РЕКЛАМЫ 👇
 ad_top_stickers = (
@@ -587,9 +662,10 @@ def release_promo(code, user_id):
 
 
 def multi_net_discount(n):
-    if n >= 5: return 30
-    if n == 4: return 20
-    if n == 3: return 10
+    """Скидка «Все сети» за пакет (настройки mp_pack_3/4/5 в /glaz)."""
+    if n >= 5: return min(90, int(net_cfg("mp_pack_5")))
+    if n == 4: return min(90, int(net_cfg("mp_pack_4")))
+    if n == 3: return min(90, int(net_cfg("mp_pack_3")))
     return 0
 
 
@@ -1760,7 +1836,7 @@ def process_ad_media_loop(message, selected_network, city):
         
         # Берем подпись для выбранной сети (если "Все сети", берем подпись МК как дефолтную для превью)
         preview_network = "Мужской Клуб" if selected_network == "Все сети" else selected_network
-        signature = network_signatures.get(preview_network, "")
+        signature = get_signature(preview_network)
         
         user_name = f'<b>{get_user_html_link(message.from_user)}</b>'
         full_text_preview = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{escape_html(text)}\n\n{signature}"
@@ -1856,10 +1932,14 @@ def handle_confirmation_step(message, text, media_type, file_id, selected_networ
 
     # 👇 ЛОГИКА ВЫБОРА ИНТЕРВАЛА 👇
     if message.text == "🔁 Настроить Автопубликацию":
+        if autopost_extra() <= 0:
+            bot.send_message(message.chat.id, "Автопостинг сейчас отключён. Выберите «✅ Опубликовать разово (сейчас)».")
+            bot.register_next_step_handler(message, handle_confirmation_step, text, media_type, file_id, selected_network, city)
+            return
         if not publish_precheck(message, text, selected_network, city):
             return
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=4)
-        markup.add("4", "6", "8", "12")
+        markup.add(*[str(i) for i in autopost_intervals()])
         markup.add("Отмена")
         bot.send_message(message.chat.id, "⏱ <b>Настройка автопостинга:</b>\nЧерез сколько часов автоматически повторять пост?\n\n<i>Нажмите кнопку или напишите цифру вручную (от 1 до 24):</i>", parse_mode="HTML", reply_markup=markup)
         bot.register_next_step_handler(message, process_autopost_interval, text, media_type, file_id, selected_network, city)
@@ -1974,7 +2054,7 @@ def publish_core(user, raw_text, media_array, selected_network, city):
             result["limit"].append(network)
             continue
 
-        signature = network_signatures.get(network, "")
+        signature = get_signature(network)
         full_text = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{text}\n\n{signature}"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
@@ -2130,11 +2210,13 @@ def process_autopost_interval(message, text, media_type, file_id, selected_netwo
         "file_id": file_id,
         "media_array": media_array, # <--- ТЕПЕРЬ СОХРАНЯЕТ АЛЬБОМ
         "interval_hours": interval,
-        "posts_left": 2, 
+        "posts_left": autopost_extra(),
+        "total": autopost_extra() + 1,
         "next_run": now_ekb() + timedelta(hours=interval)
     })
     
-    bot.send_message(message.chat.id, f"🔁 <b>Автопостинг включен!</b>\n\nПервый пост только что вышел. Следующие 2 поста выйдут автоматически с интервалом в <b>{interval} ч.</b>", parse_mode="HTML")
+    n = autopost_extra()
+    bot.send_message(message.chat.id, f"🔁 <b>Автопостинг включен!</b>\n\nПервый пост только что вышел. Ещё {n} {'пост выйдет' if n == 1 else 'поста выйдут' if n < 5 else 'постов выйдут'} автоматически с интервалом в <b>{interval} ч.</b>", parse_mode="HTML")
     ask_for_new_post(message)
 
 def ask_for_new_post(message):
@@ -2677,7 +2759,7 @@ def handle_ad_checkout(call):
     if url_ton:
         markup.add(types.InlineKeyboardButton("💎 Оплатить через TON (CryptoBot)", url=url_ton))
 
-    markup.add(types.InlineKeyboardButton("💳 Проблема с оплатой/Альтернатива", callback_data=f"ad_altpay_{offer_id}"))
+    markup.add(types.InlineKeyboardButton("📲 Альтернативный способ оплаты", callback_data=f"ad_altpay_{offer_id}"))
 
     # 👇 ЭКОСИСТЕМА СЕКРЕТАРЯ: Кэшбэк (₽) и Очки (🎰) 👇
     paid_user = db['paid_users'].find_one({"uid": user_id}) or {}
@@ -2740,37 +2822,137 @@ def _get_offer(offer_id, user_id):
         return None
 
 
+def _next_order_no():
+    doc = db['mp_counters'].find_one_and_update({"_id": "alt_order"}, {"$inc": {"n": 1}}, upsert=True, return_document=ReturnDocument.AFTER)
+    return 1000 + int(doc["n"])
+
+
+def _alt_admin_markup(offer_id):
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton("✅ Оплата пришла — выдать доступ", callback_data=f"alt_ok_{offer_id}"))
+    m.add(types.InlineKeyboardButton("❌ Отклонить", callback_data=f"alt_no_{offer_id}"))
+    return m
+
+
+def _alt_order_text(offer, header):
+    rub = int(offer.get("rub") or int(offer["amount"] * _rub_per_star()))
+    network = NET_NAMES.get(offer["net_key"], offer["net_key"])
+    who = offer.get("who") or f"<a href='tg://user?id={offer['uid']}'>{offer['uid']}</a>"
+    return (f"{header}\n\n"
+            f"🧾 Заказ: <b>№ {offer['order_no']}</b>\n"
+            f"👤 {who} (<code>{offer['uid']}</code>)\n"
+            f"🌐 {escape_html(network)}, 📍 {escape_html(offer['city'])}\n"
+            f"⏳ {offer['days']} дн." + (" 📌 закреп" if offer.get("pin") else "") + (" 🔗 реклама канала" if offer.get("vip") else "") + "\n"
+            f"💰 К оплате: <b>{rub} ₽</b> ({offer['amount']}⭐️)" + (f"\n🎁 Промокод: {escape_html(offer['promo'])}" if offer.get("promo") else ""))
+
+
+def request_alt_payment(offer_id, user):
+    """Альтернативная оплата (пополнение баланса номера телефона): присваиваем короткий номер заказа
+    и сразу шлём админам карточку заказа с кнопкой «Выдать доступ». -> dict для показа клиенту или None."""
+    try:
+        offer = mp_offers.find_one({"_id": ObjectId(str(offer_id)), "uid": user.id})
+    except Exception:
+        offer = None
+    if not offer:
+        return None
+    if not offer.get("order_no"):
+        rub = int(offer["amount"] * _rub_per_star())
+        name = escape_html(" ".join(x for x in [getattr(user, "first_name", ""), getattr(user, "last_name", "")] if x) or "Пользователь")
+        uname = getattr(user, "username", "") or ""
+        who = f"<a href='tg://user?id={user.id}'>{name}</a>" + (f" @{escape_html(uname)}" if uname else "")
+        upd = {"order_no": _next_order_no(), "alt": True, "rub": rub, "who": who, "status": "waiting",
+               "dt": datetime.utcnow() + timedelta(days=5)}  # заказ живёт около недели (TTL — 2 дня от dt)
+        mp_offers.update_one({"_id": offer["_id"]}, {"$set": upd})
+        offer.update(upd)
+        try:
+            bot.send_message(ADMIN_CHAT_ID, _alt_order_text(offer, "📲 <b>Альтернативная оплата рекламы</b>\nКлиент пополнит баланс номера телефона. Пришлите ему номер, а когда деньги придут — нажмите кнопку."),
+                             parse_mode="HTML", reply_markup=_alt_admin_markup(offer["_id"]), message_thread_id=ADS_THREAD_ID)
+        except Exception as e:
+            log_error("альтернативная оплата: уведомление админам", e, user.id)
+    network = NET_NAMES.get(offer["net_key"], offer["net_key"])
+    return {"order_no": offer["order_no"], "rub": offer["rub"], "amount": offer["amount"], "network": network,
+            "city": offer["city"], "days": offer["days"], "pin": bool(offer.get("pin"))}
+
+
+def alt_client_text(r):
+    return (f"📲 <b>Альтернативный способ оплаты</b>\n\n"
+            f"Оплата пополнением баланса номера телефона.\n"
+            f"Сумма: {r['amount']}⭐️ × {_rub_per_star():g} ₽ = <b>{r['rub']} ₽</b>\n\n"
+            f"🧾 Ваш заказ: <b>№ {r['order_no']}</b>\n"
+            f"🌐 {escape_html(r['network'])}, 📍 {escape_html(r['city'])}, ⏳ {r['days']} дн." + (" 📌 с закрепом" if r["pin"] else "") + "\n\n"
+            f"Напишите в поддержку номер заказа <b>{r['order_no']}</b> — администратор пришлёт номер телефона для пополнения. "
+            f"Как только оплата придёт, доступ откроется автоматически и бот пришлёт сообщение.")
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ad_altpay_'))
 def handle_alternative_payment(call):
     bot.answer_callback_query(call.id)
-    offer = _get_offer(call.data.replace("ad_altpay_", "", 1), call.from_user.id)
-    if not offer:
+    r = request_alt_payment(call.data.replace("ad_altpay_", "", 1), call.from_user)
+    if not r:
         bot.send_message(call.message.chat.id, "❌ Счёт устарел. Выберите тариф заново.", reply_markup=get_main_keyboard())
         return
-    amount, days, city = int(offer["amount"]), offer["days"], offer["city"]
-    network = NET_NAMES.get(offer["net_key"], offer["net_key"])
-
-    # Единый курс сети из панели /glaz (как у Секретаря, handlers/admin.py → req_manual_pay)
-    rate = _rub_per_star()
-    rub_amount = int(amount * rate)
-
-    text = (
-        f"💳 <b>Запрос на альтернативную оплату (Карта / СБП)</b>\n\n"
-        f"Оплатить рекламу можно на одноразовый технологический номер телефона. Сумма рассчитывается по формуле:\n"
-        f"{amount} звезд × {rate:g} ₽ (курс 1 звезды) = <b>{rub_amount}₽</b>\n\n"
-        f"<b>Ваш заказ:</b>\n"
-        f"🌐 Сеть: <b>{escape_html(network)}</b>\n"
-        f"📍 Город: <b>{escape_html(city)}</b>\n"
-        f"⏳ Срок: <b>{days} дн.</b>" + (" 📌 с закрепом" if offer.get("pin") else "") + "\n"
-        f"🧾 Счёт: <code>{offer['_id']}</code>\n\n"
-        f"👇 <i>Пожалуйста, перешлите это сообщение (чек) в нашу Поддержку, и дежурный администратор выдаст вам реквизиты!</i>"
-    )
     markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(types.InlineKeyboardButton("💬 Получить реквизиты в Поддержке", url=support_url()))
-
+    markup.add(types.InlineKeyboardButton("💬 Написать в поддержку", url=support_url()))
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
-    bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+    bot.send_message(call.message.chat.id, alt_client_text(r), parse_mode="HTML", reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('alt_ok_') or call.data.startswith('alt_no_'))
+def handle_alt_decision(call):
+    if not is_admin_call(call): return
+    approve = call.data.startswith('alt_ok_')
+    oid = call.data[7:]
+    admin = call.from_user.first_name or str(call.from_user.id)
+    # Атомарно: два админа не выдадут доступ дважды
+    try:
+        offer = mp_offers.find_one_and_update({"_id": ObjectId(oid), "alt": True, "status": "waiting"},
+                                              {"$set": {"status": "paid" if approve else "rejected", "decided_by": call.from_user.id,
+                                                        "dt": datetime.utcnow() + timedelta(days=30)}})
+    except Exception:
+        offer = None
+    if not offer:
+        bot.answer_callback_query(call.id, "Заказ уже обработан или устарел.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+    uid = offer["uid"]
+    if approve:
+        if offer.get("promo") and not consume_promo(offer["promo"], uid):
+            log_error("промокод исчерпан при альтернативной оплате", offer["promo"], uid)
+        add_revenue("ads", int(offer.get("rub") or 0), uid, currency="RUB")
+        network = NET_NAMES.get(offer["net_key"], offer["net_key"])
+        grant_ad_access(uid, network, offer["city"], int(offer["days"]), bool(offer.get("pin")), bool(offer.get("vip")),
+                        f"альтернатива № {offer['order_no']}, {offer.get('rub')} ₽, выдал {admin}")
+        status = f"✅ <b>Доступ выдан</b> ({escape_html(admin)})"
+    else:
+        try: bot.send_message(uid, f"❌ Заказ № {offer['order_no']} отклонён. Если вы уже оплатили — напишите в поддержку.")
+        except Exception: pass
+        status = f"❌ <b>Отклонено</b> ({escape_html(admin)})"
+    try:
+        bot.edit_message_text(_alt_order_text(offer, "📲 <b>Альтернативная оплата рекламы</b>") + "\n\n" + status,
+                              call.message.chat.id, call.message.message_id, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@bot.message_handler(commands=['order'])
+def admin_find_order(message):
+    """/order 1042 — найти заказ альтернативной оплаты по номеру, который прислал клиент."""
+    if not is_admin(message.from_user.id):
+        return
+    digits = re.sub(r"\D", "", message.text or "")
+    if not digits:
+        bot.reply_to(message, "Формат: /order 1042")
+        return
+    offer = mp_offers.find_one({"order_no": int(digits), "alt": True})
+    if not offer:
+        bot.reply_to(message, f"Заказ № {digits} не найден (заказы хранятся около недели).")
+        return
+    st = {"waiting": "⏳ ждёт оплаты", "paid": "✅ доступ выдан", "rejected": "❌ отклонён"}.get(offer.get("status"), "?")
+    bot.send_message(message.chat.id, _alt_order_text(offer, f"🧾 <b>Заказ № {offer['order_no']}</b> — {st}"), parse_mode="HTML",
+                     reply_markup=_alt_admin_markup(offer["_id"]) if offer.get("status") == "waiting" else None,
+                     message_thread_id=getattr(message, "message_thread_id", None))
+
 
 # ==================== ОПЛАТА ИЗ ЭКОСИСТЕМЫ РУЛЕТКИ (₽ / Очки) ====================
 
@@ -3016,7 +3198,7 @@ def _run_autopost(post, now):
         if not sub:
             continue  # эта сеть не оплачена
 
-        signature = network_signatures.get(net, "")
+        signature = get_signature(net)
         full_text = f"{ad_top_stickers}📢 Объявление от {user_name}:\n\n{safe_text}\n\n{signature}"
         reply_markup = types.InlineKeyboardMarkup()
         reply_markup.add(types.InlineKeyboardButton(text="Напиши мне в ЛС", url=f"tg://user?id={user_id}", style="success", icon_custom_emoji_id="5470060791883374114"))
@@ -3042,7 +3224,7 @@ def _run_autopost(post, now):
         )
     else:
         autopost_queue.delete_one({"_id": post["_id"]})
-        try: bot.send_message(user_id, f"ℹ️ Серия автопубликаций для <b>{escape_html(network)} ({escape_html(city)})</b> завершена (3 из 3 постов вышли).", parse_mode="HTML")
+        try: bot.send_message(user_id, f"ℹ️ Серия автопубликаций для <b>{escape_html(network)} ({escape_html(city)})</b> завершена (вышло постов: {post.get('total', 3)}).", parse_mode="HTML")
         except Exception: pass
 
 # 👇 ЗАПУСКАЕМ НАШ НОВЫЙ ПОТОК (Вставить перед if __name__ == '__main__':)

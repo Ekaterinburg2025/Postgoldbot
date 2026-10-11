@@ -396,13 +396,18 @@ function stepWhere() {
   const paid = city => S.subs.find(s => s.active && s.city === city && (s.network === "Все сети" || s.net === w.net || (w.net === "all")));
   let h = `<div class="pills">${nets.map(n => `<button class="pill ${n.key === w.net ? "on" : ""}" onclick="pickNet('${n.key}')">${esc(n.name)}</button>`).join("")}</div>
     <input class="search" id="q" placeholder="Найти город" value="${esc(w.q)}" autocomplete="off">`;
-  if (w.net === "all") h += `<div class="note gold small" style="margin-top:0">«Все сети» — объявление выходит во всех сетях города. Скидка за пакет: 3 сети −10%, 4 — −20%, 5 — −30%.</div>`;
+  if (w.net === "all") h += `<div class="note gold small" style="margin-top:0">«Все сети» — объявление выходит во всех сетях города.${packText()}</div>`;
   h += `<div class="panel">` + (list.length ? list.map(c => {
     const p = paid(c.name);
     return `<button class="row" onclick="pickCity('${esc(c.token)}')"><div class="grow"><div class="title">${esc(c.name)}</div><div class="sub">${chatsLabel(c, w.net)}</div></div>${p ? `<span class="paidmark">оплачено</span>` : ""}<span class="chev">›</span></button>`;
   }).join("") : `<div class="row muted">Ничего не нашлось</div>`) + `</div>`;
   $("#wbody").innerHTML = h;
   const q = $("#q"); q.oninput = () => { w.q = q.value; const pos = q.selectionStart; stepWhere(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); };
+}
+function packText() {
+  const m = S.config.multi_net || {}, parts = [];
+  if (m["3"]) parts.push(`3 сети −${m["3"]}%`); if (m["4"]) parts.push(`4 — −${m["4"]}%`); if (m["5"]) parts.push(`5 — −${m["5"]}%`);
+  return parts.length ? " Скидка за пакет: " + parts.join(", ") + "." : "";
 }
 function chatsLabel(c, net) {
   const counts = c.counts || {};
@@ -465,7 +470,7 @@ async function stepAccess() {
       <button class="paybtn" onclick="pay('points')" ${q.balances.points >= pts ? "" : "disabled"}><span class="ic">🎰</span><span class="grow"><b>Очками</b><span>${fmt(pts)} очков, у вас ${fmt(q.balances.points)}</span></span></button>
       <button class="paybtn" onclick="pay('usdt')"><span class="ic">🟢</span><span class="grow"><b>USDT через CryptoBot</b><span>${fmt(rub)} ₽ по курсу</span></span></button>
       <button class="paybtn" onclick="pay('ton')"><span class="ic">💎</span><span class="grow"><b>TON через CryptoBot</b><span>${fmt(rub)} ₽ по курсу</span></span></button>
-      <button class="paybtn" onclick="pay('card')"><span class="ic">🏦</span><span class="grow"><b>Картой или СБП</b><span>${fmt(rub)} ₽ через поддержку</span></span></button>
+      <button class="paybtn" onclick="pay('alt')"><span class="ic">📲</span><span class="grow"><b>Альтернативный способ оплаты</b><span>Пополнение баланса телефона, ${fmt(rub)} ₽</span></span></button>
     </div>
     ${S.cheap ? `<p class="small muted" style="margin:14px 4px">Звёзды можно купить дешевле официального курса — <a href="#" onclick="openTg('${esc(S.cheap)}');return false">через проверенный сервис</a>.</p>` : ""}`;
   $("#wbody").innerHTML = h;
@@ -503,8 +508,15 @@ async function pay(method) {
   } else if (j.kind === "paid") {
     haptic("ok"); S.subs = j.subs; S.balances = j.balances; toast(j.message);
     w.step = 3; w.skippedPay = false; render();
-  } else if (j.kind === "card") {
-    sheet(`<h2 style="margin-top:4px">Оплата картой или СБП</h2><div class="panel" style="padding:14px 16px">${esc(j.text)}</div>
+  } else if (j.kind === "alt") {
+    haptic("ok");
+    sheet(`<h2 style="margin-top:4px">Альтернативный способ оплаты</h2>
+      <div class="panel" style="padding:16px">
+        <div class="muted small">Ваш номер заказа</div>
+        <div class="num" style="font-size:34px;margin:4px 0 10px">№ ${esc(j.order_no)}</div>
+        <div>Оплата пополнением баланса номера телефона: <b>${fmt(j.rub)} ₽</b> <span class="muted">(${fmt(j.amount)} ⭐️ × ${j.rate} ₽)</span>.</div>
+        <p class="muted small" style="margin:10px 0 0">Напишите в поддержку номер заказа — администратор пришлёт номер телефона для пополнения. Как только оплата придёт, доступ откроется сам, а бот пришлёт сообщение.</p>
+      </div>
       <div style="height:12px"></div><button class="btn primary block" onclick="openTg('${esc(j.support_url)}')">Написать в поддержку</button>`);
   }
 }
@@ -623,10 +635,13 @@ function stepPublish() {
   const w = S.w;
   if (w.result) return renderResult();
   const lim = S.config.daily_limit;
+  const extra = S.config.autopost_extra || 0, ints = S.config.autopost_intervals || [4, 6, 8, 12];
+  if (extra <= 0) w.mode = "once";
+  if (!ints.includes(w.interval)) w.interval = ints[Math.min(1, ints.length - 1)];
   const h = `<div class="panel">
       <button class="row" onclick="setMode('once')"><div class="grow"><div class="title">Опубликовать сейчас</div><div class="sub">Один выход во всех оплаченных чатах</div></div><span class="toggle ${w.mode === "once" ? "on" : ""}"></span></button>
-      <button class="row" onclick="setMode('auto')"><div class="grow"><div class="title">Сейчас и ещё 2 раза автоматически</div><div class="sub">Посты выйдут с выбранным интервалом</div></div><span class="toggle ${w.mode === "auto" ? "on" : ""}"></span></button>
-      ${w.mode === "auto" ? `<div class="row"><div class="grow"><div class="sub" style="margin-bottom:8px">Интервал</div><div class="chips">${[4, 6, 8, 12].map(n => `<button class="${w.interval === n ? "on" : ""}" onclick="setInt(${n})">${n} ч</button>`).join("")}</div></div></div>` : ""}
+      ${extra > 0 ? `<button class="row" onclick="setMode('auto')"><div class="grow"><div class="title">Сейчас и ещё ${extra} ${plural(extra, "раз", "раза", "раз")} автоматически</div><div class="sub">Посты выйдут с выбранным интервалом</div></div><span class="toggle ${w.mode === "auto" ? "on" : ""}"></span></button>` : ""}
+      ${w.mode === "auto" && extra > 0 ? `<div class="row"><div class="grow"><div class="sub" style="margin-bottom:8px">Интервал</div><div class="chips">${ints.map(n => `<button class="${w.interval === n ? "on" : ""}" onclick="setInt(${n})">${n} ч</button>`).join("")}</div></div></div>` : ""}
     </div>
     <div class="panel" style="margin-top:12px"><label class="check"><input type="checkbox" id="tplchk" ${w.saveTpl ? "checked" : ""}><span>Сохранить как шаблон</span></label></div>
     <p class="small muted" style="margin:12px 4px">В день можно выложить до ${lim} ${plural(lim, "поста", "постов", "постов")} в одной сети города (автопосты тоже считаются).</p>
@@ -671,7 +686,7 @@ async function viewPosts() {
     else b = `<div class="panel">${S.posts.map(p => `<div class="row"><div class="grow"><div class="title">${esc(p.network)}</div><div class="sub">${esc(p.city)}, ${esc(p.time)}${p.auto ? ", автопост" : ""}</div></div><button class="linkbtn" onclick="openTg('${esc(p.link)}')">Открыть</button><button class="btn danger" style="flex:none;min-height:34px;padding:0 10px" onclick="delPost('${p.id}')">Удалить</button></div>`).join("")}</div>
       <div style="height:12px"></div><button class="btn danger block" onclick="delAll()">Удалить все объявления</button>`;
   } else {
-    if (!S.autos.length) b = `<div class="empty"><div class="big">🔁</div><b>Автопостов нет</b><p>При публикации выберите «Сейчас и ещё 2 раза автоматически».</p></div>`;
+    if (!S.autos.length) b = `<div class="empty"><div class="big">🔁</div><b>Автопостов нет</b><p>${(S.config.autopost_extra || 0) > 0 ? "При публикации выберите автоматический повтор." : "Автопостинг сейчас отключён."}</p></div>`;
     else b = `<div class="panel">${S.autos.map(a => `<div class="row"><div class="grow"><div class="title">${esc(a.network)}, ${esc(a.city)}</div><div class="sub">Следующий выход ${esc(a.next)}, осталось ${a.left}, каждые ${a.interval} ч</div></div><button class="btn danger" style="flex:none;min-height:34px;padding:0 10px" onclick="cancelAuto('${a.id}')">Отменить</button></div>`).join("")}</div>`;
   }
   $("#plist").innerHTML = b;
@@ -712,12 +727,12 @@ function viewHow() {
   const c = S.config;
   $("#app").innerHTML = `<div class="wrap howto"><h1>Как считается цена</h1>
     <div class="f"><b>Базовая цена</b><p class="muted small">Зависит от размера чата (больше или меньше 1000 участников) и срока: ${c.days.join(", ")} дней. Для крупных общих чатов — отдельный тариф.</p></div>
-    <div class="f"><b>Все сети города</b><p class="muted small">Цена одной сети × число сетей, которые у вас ещё не оплачены. Скидка за пакет: 3 сети −10%, 4 — −20%, 5 — −30%.</p></div>
+    <div class="f"><b>Все сети города</b><p class="muted small">Цена одной сети × число сетей, которые у вас ещё не оплачены.${packText()}</p></div>
     ${c.renew_pct ? `<div class="f"><b>Продление −${c.renew_pct}%</b><p class="muted small">Пока доступ идёт и ещё ${c.renew_grace_days} ${plural(c.renew_grace_days, "день", "дня", "дней")} после окончания. Новый срок добавляется к текущему — оставшиеся дни не сгорают.</p></div>` : ""}
     <div class="f"><b>Закреп +${Math.round((c.pin_markup - 1) * 100)}%</b><p class="muted small">Ваши посты закрепляются в чате.</p></div>
     <div class="f"><b>Реклама канала ×${c.vip_markup}</b><p class="muted small">После одобрения администратором, со ссылками.</p></div>
     <div class="f"><b>Промокод</b><p class="muted small">Применяется последним: процент или фиксированная сумма в звёздах.</p></div>
-    <div class="f"><b>Курс</b><p class="muted small">1 ⭐️ = ${c.rub_per_star} ₽ (крипта, кэшбэк, карта) = ${c.points_per_star} очков.</p></div>
+    <div class="f"><b>Курс</b><p class="muted small">1 ⭐️ = ${c.rub_per_star} ₽ (крипта, кэшбэк, альтернативная оплата) = ${c.points_per_star} очков.</p></div>
     <div class="f"><b>Лимит</b><p class="muted small">До ${c.daily_limit} публикаций в день в одной сети города.</p></div></div>`;
 }
 

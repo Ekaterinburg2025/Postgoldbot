@@ -247,9 +247,10 @@ def register_cabinet(app, mp):
                 "daily_limit": int(mp.net_cfg("mp_daily_limit")), "pin_markup": float(mp.net_cfg("mp_pin_markup")),
                 "vip_markup": float(mp.net_cfg("mp_vip_markup")), "renew_pct": int(mp.net_cfg("mp_renew_discount")),
                 "renew_grace_days": int(mp.net_cfg("mp_renew_grace_days")), "days": list(mp.VALID_DAYS),
-                "multi_net": {"3": 10, "4": 20, "5": 30},
+                "multi_net": {"3": mp.multi_net_discount(3), "4": mp.multi_net_discount(4), "5": mp.multi_net_discount(5)},
+                "autopost_extra": mp.autopost_extra(), "autopost_intervals": mp.autopost_intervals(),
             },
-            "signatures": mp.network_signatures,
+            "signatures": {name: mp.get_signature(name) for name in mp.network_signatures},
             "support_url": mp.support_url(),
             "cheap_stars_url": str(mp.net_cfg("cheap_stars_url") or ""),
         })
@@ -312,7 +313,9 @@ def register_cabinet(app, mp):
         except (TypeError, ValueError):
             days = 0
         method = str(d.get("method") or "")
-        if not net or days not in mp.VALID_DAYS or method not in ("stars", "usdt", "ton", "rub", "points", "card"):
+        if method == "card":
+            method = "alt"  # старое имя способа
+        if not net or days not in mp.VALID_DAYS or method not in ("stars", "usdt", "ton", "rub", "points", "alt"):
             return fail("Проверьте выбор тарифа.")
         code = str(d.get("promo") or "").strip()
         promo = mp.get_valid_promo(code, u.id) if code else None
@@ -346,12 +349,14 @@ def register_cabinet(app, mp):
                 return fail(text)
             return jsonify({"ok": True, "kind": "paid", "message": text, "subs": subs_view(u.id), "balances": balances(u.id)})
 
-        # card: альтернативная оплата через поддержку
-        rub = int(amount * mp._rub_per_star())
-        return jsonify({"ok": True, "kind": "card", "amount": amount, "rub": rub, "offer_id": oid,
-                        "support_url": mp.support_url(),
-                        "text": f"Оплата картой / СБП: {amount}⭐️ × {mp._rub_per_star():g} ₽ = {rub} ₽. "
-                                f"Напишите в поддержку и укажите номер счёта {oid} — администратор пришлёт реквизиты и выдаст доступ."})
+        # alt: альтернативный способ — пополнение баланса номера телефона. Номер заказа + карточка админам
+        if not throttle(("alt", u.id), 5, 600):
+            return fail("Слишком много заказов подряд. Подождите несколько минут.", 429)
+        r = mp.request_alt_payment(oid, u)
+        if not r:
+            return fail("Не удалось оформить заказ. Попробуйте ещё раз.", 502)
+        return jsonify({"ok": True, "kind": "alt", "order_no": r["order_no"], "amount": r["amount"], "rub": r["rub"],
+                        "rate": mp._rub_per_star(), "support_url": mp.support_url()})
 
     @app.route('/cabinet/api/check_text', methods=['POST'])
     def api_check_text():
@@ -436,6 +441,8 @@ def register_cabinet(app, mp):
                 interval = 0
             if not 1 <= interval <= 24:
                 return fail("Интервал автопостинга — от 1 до 24 часов.")
+            if mp.autopost_extra() <= 0:
+                return fail("Автопостинг сейчас отключён.")
         err = mp.precheck_core(u.id, text, selected_network, city)
         if err:
             import re as _re
@@ -453,9 +460,9 @@ def register_cabinet(app, mp):
             mp.autopost_queue.insert_one({
                 "user_id": u.id, "network": selected_network, "city": city, "text": text,
                 "media_type": media_type, "file_id": file_id, "media_array": media,
-                "interval_hours": interval, "posts_left": 2,
+                "interval_hours": interval, "posts_left": mp.autopost_extra(), "total": mp.autopost_extra() + 1,
                 "next_run": mp.now_ekb() + mp.timedelta(hours=interval), "source": "cabinet"})
-            auto = {"interval": interval, "left": 2}
+            auto = {"interval": interval, "left": mp.autopost_extra()}
         for p in res["published"]:
             cid = str(p["chat_id"]).replace("-100", "")
             p["link"] = f"https://t.me/c/{cid}/{p['message_id']}"
