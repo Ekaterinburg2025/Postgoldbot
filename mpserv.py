@@ -2630,13 +2630,14 @@ def handle_alternative_payment(call):
     amount, days, city = int(offer["amount"]), offer["days"], offer["city"]
     network = NET_NAMES.get(offer["net_key"], offer["net_key"])
 
-    # Формула — та же, что у Секретаря (handlers/admin.py → req_manual_pay)
-    rub_amount = int(round(amount * 1.65 * 1.1))
+    # Единый курс сети из панели /glaz (как у Секретаря, handlers/admin.py → req_manual_pay)
+    rate = _rub_per_star()
+    rub_amount = int(amount * rate)
 
     text = (
         f"💳 <b>Запрос на альтернативную оплату (Карта / СБП)</b>\n\n"
         f"Оплатить рекламу можно на одноразовый технологический номер телефона. Сумма рассчитывается по формуле:\n"
-        f"{amount} звезд * 1.65 (курс 1 звезды) + 10% комиссии банка за пополнение = <b>{rub_amount}₽</b>\n\n"
+        f"{amount} звезд × {rate:g} ₽ (курс 1 звезды) = <b>{rub_amount}₽</b>\n\n"
         f"<b>Ваш заказ:</b>\n"
         f"🌐 Сеть: <b>{escape_html(network)}</b>\n"
         f"📍 Город: <b>{escape_html(city)}</b>\n"
