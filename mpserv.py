@@ -216,7 +216,9 @@ def check_stop_words(text, ignore_black_zone=False):
         dict_data = {}
 
     # 1. КРАСНАЯ ЗОНА + признаки несовершеннолетних (всегда у всех)
-    checks = [(p, None) for p in BASE_HARD_RED + BASE_MINOR + BASE_SOFT_RED]
+    # base_v1: встроенные слова уже в общем словаре панели /glaz — берём оттуда (признаки <18 остаются в коде)
+    base = BASE_MINOR if dict_data.get("base_v1") else BASE_HARD_RED + BASE_MINOR + BASE_SOFT_RED
+    checks = [(p, None) for p in base]
     checks += _dict_patterns(dict_data.get("red"))
     checks += _dict_patterns(dict_data.get("soft_red"))
     for pattern, label in checks:
