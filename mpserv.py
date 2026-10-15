@@ -2974,10 +2974,28 @@ def handle_ecosystem_payment(call):
         try: bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception: pass
 
+MIN_MSGS_FOR_POINTS = 50
+NEWBIE_MSG = f"🔒 Недоступно новым аккаунтам: нужно {MIN_MSGS_FOR_POINTS} сообщений в наших чатах или статус (VIP / BEYOND / верификация / индульгенция / тег)."
+
+
+def is_newbie_without_status(uid):
+    """Меньше 50 сообщений в наших чатах И нет ни одного статуса. Админов не трогаем."""
+    if uid in CORE_ADMINS:
+        return False
+    u = db['users'].find_one({"_id": uid}) or {}
+    good_tags = ("Верифицирован МК", "Спонсор_Одобрен", "Свободен", "Индульгенция")
+    if (u.get("is_vip") or u.get("is_queer") or u.get("is_verified") or u.get("is_sponsor") or u.get("is_free")
+            or u.get("indulgence") or (not u.get("tag_game") and u.get("custom_tag") in good_tags)):
+        return False
+    r = list(db['chat_stats'].aggregate([{"$match": {"uid": uid}}, {"$group": {"_id": None, "n": {"$sum": "$msgs"}}}]))
+    return (int(r[0]["n"]) if r else 0) < MIN_MSGS_FOR_POINTS
 
 def pay_offer_from_wallet(offer_id, user_id, is_points):
     """Оплата выставленного счёта кэшбэком (₽) или очками. Общая для бота и кабинета.
     -> (успех, текст)."""
+    # 🔒 Новичкам без статуса оплата очками/кэшбэком закрыта (до того, как сгорит счёт)
+    if is_newbie_without_status(user_id):
+        return False, NEWBIE_MSG
     # Атомарно забираем счёт: двойной тап больше не спишет дважды
     try:
         offer = mp_offers.find_one_and_delete({"_id": ObjectId(str(offer_id)), "uid": user_id})
